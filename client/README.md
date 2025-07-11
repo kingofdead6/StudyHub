@@ -1,0 +1,1 @@
+Just run npm i then npm run dev and enjoy coding 
