@@ -522,7 +522,7 @@ export default function DynamicSignup() {
             {/* Once you provide the URL, replace this div with the video tag: */}
             {
             <video
-              src="../src/assets/4K stars.mp4"
+              src="../src/assets/A.mp4"
               autoPlay
               loop
               muted
