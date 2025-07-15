@@ -1,10 +1,13 @@
 import React from 'react'
-import Try from '../component/AiBot/try'
-
+import Hero from '../component/Home/Hero'
+import WhatWeDo from '../component/Home/WhatWeDo.jsx'
+import ContactPage from '../component/Home/ContactPage.jsx'
 const HomePage = () => {
   return (
     <div>
-        <Try />
+        <Hero />
+        <WhatWeDo />
+        <ContactPage />
     </div>
   )
 }
