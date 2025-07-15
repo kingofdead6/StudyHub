@@ -8,6 +8,8 @@ import AdminUsers from "./component/Admin/AdminUsers";
 import AdminUploads from "./component/Admin/AdminUploads";
 import AdminContact from "./component/Admin/AdminContact";
 import NotFound from "./pages/NotFound";
+import LoginPage from './pages/LoginPage';
+import SignUpPage from './pages/SignUpPage';
 
 
 
@@ -19,10 +21,12 @@ function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
-       <Route path="/admin-dashboard" element={<AdminDashboard />}>
+          <Route path="/admin-dashboard" element={<AdminDashboard />}>
           <Route path="users" element={<AdminUsers />} />
           <Route path="uploads" element={<AdminUploads />} />
           <Route path="contact-messages" element={<AdminContact />} />
+          <Route path="/LoginPage" element={<LoginPage />} />
+          <Route path='/SignUp' element={<SignUpPage />} />
           <Route index element={<div/>} />
         </Route>
         <Route path="*" element={<NotFound />} />
