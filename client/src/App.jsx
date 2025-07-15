@@ -10,6 +10,8 @@ import AdminContact from "./component/Admin/AdminContact";
 import NotFound from "./pages/NotFound";
 import LoginPage from './pages/LoginPage';
 import SignUpPage from './pages/SignUpPage';
+import ChatPage from './pages/ChatPage';
+
 
 
 
@@ -25,6 +27,7 @@ function App() {
           <Route path="users" element={<AdminUsers />} />
           <Route path="uploads" element={<AdminUploads />} />
           <Route path="contact-messages" element={<AdminContact />} />
+          <Route path="/chat" element={<ChatPage />} />
           <Route path="/LoginPage" element={<LoginPage />} />
           <Route path='/SignUp' element={<SignUpPage />} />
           <Route index element={<div/>} />
