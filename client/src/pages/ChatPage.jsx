@@ -1,26 +1,46 @@
-"use client"
+"use client";
 
-import { useState, useEffect, useRef, createContext, useContext } from "react"
-import { motion, AnimatePresence } from "framer-motion"
-import { Settings, ChevronLeft, ChevronRight, User, Bot, Menu, Upload } from "lucide-react"
+import { useState, useEffect, useRef, createContext, useContext } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Settings, ChevronLeft, ChevronRight, User, Bot, Menu, Upload } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 
-// Chat Context
-const ChatContext = createContext(null)
+// Chat Context (unchanged)
+const ChatContext = createContext(null);
 
 const ChatProvider = ({ children }) => {
-  const [messages, setMessages] = useState([])
-  const [isSidebarExpanded, setIsSidebarExpanded] = useState(false)
-  const [isSidebarVisible, setIsSidebarVisible] = useState(true)
+  const [messages, setMessages] = useState([]);
+  const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
+  const [isSidebarVisible, setIsSidebarVisible] = useState(true);
 
   const addMessage = (message, isUser) => {
-    setMessages((prev) => [...prev, { text: message, isUser }])
-  }
+    setMessages((prev) => [...prev, { text: message, isUser }]);
+  };
+
+  const updateLastMessage = (newText) => {
+    setMessages((prev) => {
+      const updatedMessages = [...prev];
+      if (updatedMessages.length > 0) {
+        updatedMessages[updatedMessages.length - 1] = {
+          ...updatedMessages[updatedMessages.length - 1],
+          text: newText,
+        };
+      } else {
+        updatedMessages.push({ text: newText, isUser: false });
+      }
+      return updatedMessages;
+    });
+  };
 
   return (
     <ChatContext.Provider
       value={{
         messages,
         addMessage,
+        updateLastMessage,
         isSidebarExpanded,
         setIsSidebarExpanded,
         isSidebarVisible,
@@ -29,23 +49,23 @@ const ChatProvider = ({ children }) => {
     >
       {children}
     </ChatContext.Provider>
-  )
-}
+  );
+};
 
-// Sidebar Component
+// Sidebar Component (unchanged)
 const Sidebar = () => {
-  const { isSidebarVisible } = useContext(ChatContext)
-  const [currentView, setCurrentView] = useState("main")
-  const [selectedCourse, setSelectedCourse] = useState(null)
-  const [selectedChild, setSelectedChild] = useState(null)
-  const [selectedSemester, setSelectedSemester] = useState(null)
-  const [selectedSubject, setSelectedSubject] = useState(null)
+  const { isSidebarVisible } = useContext(ChatContext);
+  const [currentView, setCurrentView] = useState("main");
+  const [selectedCourse, setSelectedCourse] = useState(null);
+  const [selectedChild, setSelectedChild] = useState(null);
+  const [selectedSemester, setSelectedSemester] = useState(null);
+  const [selectedSubject, setSelectedSubject] = useState(null);
 
   const buttonVariants = {
     hidden: { opacity: 0, x: -20 },
     visible: { opacity: 1, x: 0 },
     exit: { opacity: 0, x: -20 },
-  }
+  };
 
   const coursesData = [
     {
@@ -349,118 +369,118 @@ const Sidebar = () => {
         },
       ],
     },
-  ]
+  ];
 
   const subjectDetailsOptions = [
     { title: "Cour", id: "cour" },
     { title: "TD", id: "td" },
     { title: "EMD", id: "emd" },
-  ]
+  ];
 
   const handleCourseClick = (course) => {
-    setSelectedCourse(course)
+    setSelectedCourse(course);
     if (course.children) {
-      setCurrentView("children")
+      setCurrentView("children");
     } else {
-      setCurrentView("semesters")
-      setSelectedChild(null)
+      setCurrentView("semesters");
+      setSelectedChild(null);
     }
-  }
+  };
 
   const handleChildClick = (child) => {
-    setSelectedChild(child)
+    setSelectedChild(child);
     if (child.type === "optional") {
-      setCurrentView("subjects")
-      setSelectedSemester({ id: "optional-direct", title: "Optional Modules" })
+      setCurrentView("subjects");
+      setSelectedSemester({ id: "optional-direct", title: "Optional Modules" });
     } else {
-      setCurrentView("semesters")
+      setCurrentView("semesters");
     }
-  }
+  };
 
   const handleSemesterClick = (semester) => {
-    setSelectedSemester(semester)
-    setCurrentView("subjects")
-  }
+    setSelectedSemester(semester);
+    setCurrentView("subjects");
+  };
 
   const handleSubjectClick = (subject) => {
-    setSelectedSubject(subject)
-    setCurrentView("subject-details")
-  }
+    setSelectedSubject(subject);
+    setCurrentView("subject-details");
+  };
 
   const handleBack = () => {
     if (currentView === "subject-details") {
-      setCurrentView("subjects")
-      setSelectedSubject(null)
+      setCurrentView("subjects");
+      setSelectedSubject(null);
     } else if (currentView === "subjects") {
       if (selectedChild && selectedChild.type === "optional") {
-        setCurrentView("children")
-        setSelectedSemester(null)
+        setCurrentView("children");
+        setSelectedSemester(null);
       } else if (selectedChild) {
-        setCurrentView("semesters")
-        setSelectedSemester(null)
+        setCurrentView("semesters");
+        setSelectedSemester(null);
       } else if (selectedCourse) {
-        setCurrentView("semesters")
-        setSelectedSemester(null)
+        setCurrentView("semesters");
+        setSelectedSemester(null);
       }
     } else if (currentView === "semesters") {
       if (selectedChild) {
-        setCurrentView("children")
-        setSelectedChild(null)
+        setCurrentView("children");
+        setSelectedChild(null);
       } else {
-        setCurrentView("main")
-        setSelectedCourse(null)
+        setCurrentView("main");
+        setSelectedCourse(null);
       }
-      setSelectedSemester(null)
+      setSelectedSemester(null);
     } else if (currentView === "children") {
-      setCurrentView("main")
-      setSelectedCourse(null)
-      setSelectedChild(null)
+      setCurrentView("main");
+      setSelectedCourse(null);
+      setSelectedChild(null);
     }
-  }
+  };
 
   const getSidebarTitle = () => {
     if (currentView === "main") {
-      return "v0 Chat"
+      return "v0 Chat";
     } else if (currentView === "children" && selectedCourse) {
-      return selectedCourse.title
+      return selectedCourse.title;
     } else if (currentView === "semesters" && selectedCourse) {
-      return selectedChild ? `${selectedCourse.title} - ${selectedChild.title}` : selectedCourse.title
+      return selectedChild ? `${selectedCourse.title} - ${selectedChild.title}` : selectedCourse.title;
     } else if (currentView === "subjects" && selectedCourse) {
       if (selectedChild && selectedChild.type === "optional") {
-        return `${selectedCourse.title} - ${selectedChild.title}`
+        return `${selectedCourse.title} - ${selectedChild.title}`;
       } else if (selectedChild && selectedSemester) {
-        return `${selectedCourse.title} - ${selectedChild.title} - ${selectedSemester.title}`
+        return `${selectedCourse.title} - ${selectedChild.title} - ${selectedSemester.title}`;
       } else if (selectedSemester) {
-        return `${selectedCourse.title} - ${selectedSemester.title}`
+        return `${selectedCourse.title} - ${selectedSemester.title}`;
       }
     } else if (currentView === "subject-details" && selectedSubject) {
-      let parentTitle = ""
+      let parentTitle = "";
       if (selectedChild && selectedChild.type === "optional") {
-        parentTitle = `${selectedCourse.title} - ${selectedChild.title}`
+        parentTitle = `${selectedCourse.title} - ${selectedChild.title}`;
       } else if (selectedChild && selectedSemester) {
-        parentTitle = `${selectedCourse.title} - ${selectedChild.title} - ${selectedSemester.title}`
+        parentTitle = `${selectedCourse.title} - ${selectedChild.title} - ${selectedSemester.title}`;
       } else if (selectedSemester) {
-        parentTitle = `${selectedCourse.title} - ${selectedSemester.title}`
+        parentTitle = `${selectedCourse.title} - ${selectedSemester.title}`;
       }
-      return `${parentTitle} - ${selectedSubject.title}`
+      return `${parentTitle} - ${selectedSubject.title}`;
     }
-    return "v0 Chat"
-  }
+    return "v0 Chat";
+  };
 
   const getSubjectsForSelectedSemester = () => {
     if (selectedChild && selectedChild.type === "optional") {
-      return selectedChild.subjects
+      return selectedChild.subjects;
     }
     if (selectedChild && selectedSemester) {
-      const semester = selectedChild.semesters.find((s) => s.id === selectedSemester.id)
-      return semester ? semester.subjects : []
+      const semester = selectedChild.semesters.find((s) => s.id === selectedSemester.id);
+      return semester ? semester.subjects : [];
     }
     if (!selectedChild && selectedCourse && selectedSemester) {
-      const semester = selectedCourse.semesters.find((s) => s.id === selectedSemester.id)
-      return semester ? semester.subjects : []
+      const semester = selectedCourse.semesters.find((s) => s.id === selectedSemester.id);
+      return semester ? semester.subjects : [];
     }
-    return []
-  }
+    return [];
+  };
 
   return (
     <AnimatePresence>
@@ -497,7 +517,6 @@ const Sidebar = () => {
                 ))}
               </motion.div>
             )}
-
             {currentView === "children" && selectedCourse && selectedCourse.children && (
               <motion.div
                 key="children"
@@ -527,7 +546,6 @@ const Sidebar = () => {
                 ))}
               </motion.div>
             )}
-
             {currentView === "semesters" && selectedCourse && (
               <motion.div
                 key="semesters"
@@ -557,7 +575,6 @@ const Sidebar = () => {
                 ))}
               </motion.div>
             )}
-
             {currentView === "subjects" && selectedCourse && (
               <motion.div
                 key="subjects"
@@ -587,7 +604,6 @@ const Sidebar = () => {
                 ))}
               </motion.div>
             )}
-
             {currentView === "subject-details" && selectedSubject && (
               <motion.div
                 key="subject-details"
@@ -626,12 +642,12 @@ const Sidebar = () => {
         </motion.div>
       )}
     </AnimatePresence>
-  )
-}
+  );
+};
 
-// Quote Component
+// Quote Component (unchanged)
 const Quote = () => {
-  const quote = "The only way to do great work is to love what you do."
+  const quote = "The only way to do great work is to love what you do.";
   return (
     <motion.div
       className="flex items-center justify-center h-full"
@@ -652,9 +668,11 @@ const Quote = () => {
         ))}
       </p>
     </motion.div>
-  )
-}
+  );
+};
 
+// Chat Message Component
+// Chat Message Component
 // Chat Message Component
 const ChatMessage = ({ text, isUser }) => (
   <motion.div
@@ -677,7 +695,11 @@ const ChatMessage = ({ text, isUser }) => (
           : "bg-gray-800 text-gray-200 rounded-bl-none"
       }`}
     >
-      <p className="text-sm whitespace-pre-wrap">{text}</p>
+      <div className="markdown-content">
+        <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+          {text}
+        </ReactMarkdown>
+      </div>
     </div>
     {isUser && (
       <div className="relative flex h-8 w-8 shrink-0 overflow-hidden rounded-full bg-gradient-to-br from-gray-700 to-black">
@@ -687,62 +709,95 @@ const ChatMessage = ({ text, isUser }) => (
       </div>
     )}
   </motion.div>
-)
-
+);
 // Chat Input Component
 const ChatInput = () => {
-  const { addMessage } = useContext(ChatContext)
-  const [input, setInput] = useState("")
-  const inputRef = useRef(null)
-  const fileInputRef = useRef(null)
+  const { addMessage, updateLastMessage } = useContext(ChatContext);
+  const [input, setInput] = useState("");
+  const inputRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   const handleSubmit = async (e) => {
-    e.preventDefault()
-    if (!input.trim()) return
+    e.preventDefault();
+    if (!input.trim()) return;
 
-    addMessage(input, true)
+    const userMessage = input.trim();
+    addMessage(userMessage, true); // Add user message
+    setInput("");
 
-    try {
-      const response = await fetch("http://localhost:3001/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: input }),
-      })
+    // Add an initial empty bot message to update as the stream arrives
+    addMessage("", false);
 
-      const data = await response.json()
-      addMessage(data.reply, false)
-    } catch (err) {
-      addMessage("⚠️ Failed to connect to chatbot", false)
-    }
+    const eventSource = new EventSource(
+      `http://localhost:3001/chat?message=${encodeURIComponent(userMessage)}`
+    );
 
-    setInput("")
-  }
+    let streamedReply = "";
+
+    eventSource.onmessage = (event) => {
+      if (event.data === "[DONE]") {
+        eventSource.close();
+        return;
+      }
+      streamedReply += event.data + " ";
+      updateLastMessage(streamedReply.trim()); // Update the last bot message
+    };
+
+    eventSource.addEventListener("error", (err) => {
+      console.error("SSE error:", err);
+      updateLastMessage("⚠️ Error receiving stream");
+      eventSource.close();
+    });
+
+    eventSource.addEventListener("done", () => {
+      eventSource.close();
+    });
+  };
 
   const handleFileUpload = async (e) => {
-    const file = e.target.files[0]
-    if (!file) return
-  
-    const formData = new FormData()
-    formData.append("pdf", file) // ✅ match multer field
-  
-    addMessage(`📄 Uploaded PDF: ${file.name}`, true)
-  
-    try {
-      const response = await fetch("http://localhost:3001/pdf", {
-        method: "POST",
-        body: formData,
-      })
-  
-      const data = await response.json()
-      addMessage(data.explanation || "⚠️ Failed to process PDF", false)
-    } catch (err) {
-      addMessage("⚠️ Error uploading PDF", false)
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    addMessage(`📄 Uploaded PDF: ${file.name}`, true);
+    addMessage("", false); // Add an empty bot message for streaming
+
+    const response = await fetch("http://localhost:3001/upload-pdf", {
+      method: "POST",
+      body: formData,
+    });
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let streamedReply = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value, { stream: true });
+      const events = chunk.split("\n\n");
+
+      for (const event of events) {
+        if (event.startsWith("data:")) {
+          const word = event.replace("data: ", "").trim();
+          if (word === "[DONE]") {
+            break;
+          }
+          streamedReply += word + " ";
+          updateLastMessage(streamedReply.trim());
+        } else if (event.startsWith("event: done")) {
+          break;
+        }
+      }
     }
-  }
-  
+  };
+
   const triggerFileInput = () => {
-    fileInputRef.current.click()
-  }
+    fileInputRef.current.click();
+  };
 
   return (
     <motion.form
@@ -787,13 +842,13 @@ const ChatInput = () => {
         />
       </div>
     </motion.form>
-  )
-}
+  );
+};
 
-// Hamburger Toggle Component
+// Hamburger Toggle Component (unchanged)
 const HamburgerToggle = () => {
-  const { isSidebarVisible, setIsSidebarVisible } = useContext(ChatContext)
-  const [isHovered, setIsHovered] = useState(false)
+  const { isSidebarVisible, setIsSidebarVisible } = useContext(ChatContext);
+  const [isHovered, setIsHovered] = useState(false);
   return (
     <motion.div
       className="fixed top-4 left-4 z-50 p-2 rounded-full bg-gray-900 hover:bg-gray-800 cursor-pointer transition-colors duration-200"
@@ -831,16 +886,16 @@ const HamburgerToggle = () => {
         )}
       </AnimatePresence>
     </motion.div>
-  )
-}
+  );
+};
 
-// Main Chat Page Component
+// Main Chat Page Component (unchanged)
 const ChatPage = () => {
-  const { messages } = useContext(ChatContext)
-  const messagesEndRef = useRef(null)
+  const { messages } = useContext(ChatContext);
+  const messagesEndRef = useRef(null);
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages])
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   return (
     <div className="flex h-screen bg-black text-gray-100">
@@ -861,14 +916,14 @@ const ChatPage = () => {
         </div>
       </div>
     </div>
-  )
-}
+  );
+};
 
 // Wrap with ChatProvider
 const ChatPageWithProvider = () => (
   <ChatProvider>
     <ChatPage />
   </ChatProvider>
-)
+);
 
-export default ChatPageWithProvider
+export default ChatPageWithProvider;
