@@ -1,0 +1,40 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            Int         @id @default(autoincrement())
+  name          String
+  email         String      @unique
+  password      String
+  role          String      @default("user")
+  createdAt     DateTime    @default(now())
+}
+
+model Contact {
+  id            String      @id @default(uuid())
+  fullName      String
+  email         String
+  message       String
+  isSeen        Boolean     @default(false)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+}
+
+model Upload {
+  id            Int         @id @default(autoincrement())
+  link          String      // Cloudinary URL for the PDF
+  year          Int
+  universityYear Int
+  semester      Int
+  module        String
+  type          String      // Restricted to 'Course', 'TD', 'EMD'
+  speciality    String?
+  solution      String?     // Optional Google Drive link for solution
+  createdAt     DateTime    @default(now())
+}
