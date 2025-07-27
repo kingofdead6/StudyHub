@@ -2,12 +2,13 @@ import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { PrismaClient } from '@prisma/client';
-import extractTextFromPDF from '../utils/extractTextFromPDF.js';
+const { default: extractTextFromPDF } = await import('../utils/extractTextFromPDF.cjs');
 import extractTextFromPDFWithOCR from '../utils/ocr.js';
 import { askGroq, askGroqStream } from '../utils/groq.js';
 import cloudinary from '../utils/cloudinary.js';
 import { authMiddleware, adminMiddleware } from '../utils/authMiddleware.js';
 import fetch from 'node-fetch';
+import { PassThrough } from 'stream';
 
 const prisma = new PrismaClient();
 const __filename = fileURLToPath(import.meta.url);
@@ -37,64 +38,158 @@ function boldTitlesAndMath(text) {
   return text;
 }
 
-// Controller for /upload-pdf (JSON response)
-export const handlePdfUpload = async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
-    }
-    const filePath = path.join(__dirname, '..', req.file.path);
-    let text = await extractTextFromPDF(filePath);
-
-    if (!text || text.length < 20) {
-      console.warn('⚠️ PDF parsing returned too little, using OCR...');
-      text = await extractTextFromPDFWithOCR(filePath);
-    }
-
-    if (!text || text.trim().length < 10) {
-      await fs.unlink(filePath).catch((err) => console.error(`Error deleting file ${filePath}:`, err));
-      return res.status(400).json({ error: 'PDF is empty or unreadable' });
-    }
-
-    const explanation = await askGroq(text);
-    await fs.unlink(filePath).catch((err) => console.error(`Error deleting file ${filePath}:`, err));
-
-    res.json({ explanation });
-  } catch (err) {
-    console.error('Error in /upload-pdf route:', err.message);
-    res.status(500).json({ error: 'Internal Server Error' });
-  }
-};
-
-// Controller for /upload-pdf (SSE response)
+// Controller for /upload-pdf (SSE response, saves to Cloudinary and database)
 export const handlePdfUploadStream = async (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
 
   try {
-    if (!req.file) {
-      res.write('event: error\ndata: No file uploaded\n\n');
+    await authMiddleware(req, res, async () => {
+      const { year, universityYear, semester, module, type, speciality } = req.body;
+      const file = req.file;
+
+      if (!file || !year || !universityYear || !semester || !module || !type) {
+        res.write('event: error\ndata: All required fields (file, year, universityYear, semester, module, type) must be provided\n\n');
+        res.end();
+        return;
+      }
+
+      if (file.mimetype !== 'application/pdf') {
+        res.write('event: error\ndata: Only PDF files are allowed\n\n');
+        res.end();
+        return;
+      }
+
+      // Validate inputs
+      if (!['Course', 'TD', 'EMD'].includes(type)) {
+        res.write('event: error\ndata: Invalid type. Must be one of: Course, TD, EMD\n\n');
+        res.end();
+        return;
+      }
+
+      if (![1, 2].includes(Number(semester))) {
+        res.write('event: error\ndata: Semester must be 1 or 2\n\n');
+        res.end();
+        return;
+      }
+
+      if (![1, 2, 3, 4, 5].includes(Number(year))) {
+        res.write('event: error\ndata: Year must be between 1 and 5\n\n');
+        res.end();
+        return;
+      }
+
+      const currentYear = new Date().getFullYear();
+      if (!Number.isInteger(Number(universityYear)) || universityYear < 2000 || universityYear > currentYear + 5) {
+        res.write(`event: error\ndata: University year must be between 2000 and ${currentYear + 5}\n\n`);
+        res.end();
+        return;
+      }
+
+      if (year === '4' && !['SID', 'SIL', 'SIQ', 'SIT'].includes(speciality)) {
+        res.write('event: error\ndata: Speciality must be SID, SIL, SIQ, or SIT for 4th year\n\n');
+        res.end();
+        return;
+      }
+      if (year !== '4' && speciality) {
+        res.write('event: error\ndata: Speciality should only be provided for 4th year\n\n');
+        res.end();
+        return;
+      }
+
+      // Sanitize filename for public_id
+      const sanitizedFileName = file.originalname
+        .replace(/\s+/g, '_')
+        .replace(/[^a-zA-Z0-9._-]/g, '');
+      const publicId = `Uploads/pdf_${Date.now()}_${sanitizedFileName}`;
+
+      // Upload to Cloudinary
+      const uploadResult = await new Promise((resolve, reject) => {
+        const uploadStream = cloudinary.uploader.upload_stream(
+          {
+            folder: 'Uploads',
+            resource_type: 'raw',
+            public_id: publicId,
+            access_mode: 'public',
+          },
+          (error, result) => {
+            if (error) {
+              console.error('Cloudinary upload error:', {
+                message: error.message,
+                name: error.name,
+                http_code: error.http_code,
+              });
+              return reject(new Error(`Cloudinary upload failed: ${error.message}`));
+            }
+            console.log('Cloudinary upload successful:', {
+              public_id: result.public_id,
+              secure_url: result.secure_url,
+              bytes: result.bytes,
+              access_mode: result.access_mode,
+            });
+            resolve(result);
+          }
+        );
+
+        const bufferStream = new PassThrough();
+        bufferStream.end(file.buffer);
+        bufferStream.pipe(uploadStream);
+
+        bufferStream.on('error', (error) => {
+          console.error('Buffer stream error:', error.message);
+          reject(error);
+        });
+      });
+
+      // Extract text from PDF
+      let text = await extractTextFromPDF(file.buffer);
+      if (!text || text.length < 20) {
+        console.warn('⚠️ PDF parsing returned too little, using OCR...');
+        text = await extractTextFromPDFWithOCR(file.buffer);
+      }
+
+      if (!text || text.trim().length < 10) {
+        res.write('event: error\ndata: PDF is empty or unreadable\n\n');
+        res.end();
+        return;
+      }
+
+      // Save to database
+      const upload = await prisma.upload.create({
+        data: {
+          link: uploadResult.secure_url,
+          year: Number(year),
+          universityYear: Number(universityYear),
+          semester: Number(semester),
+          module,
+          type,
+          speciality: year === '4' ? speciality : null,
+        },
+      });
+
+      // Generate recommended questions
+      const questionsPrompt = `Based on the following PDF content for ${module} (${type}):\n${text}\n\nGenerate 3-5 relevant questions that a student might ask about this content. Return the questions as a JSON array.`;
+      const questionsResponse = await askGroq(questionsPrompt);
+      let questions = [];
+      try {
+        questions = JSON.parse(questionsResponse);
+      } catch (err) {
+        console.error('Error parsing questions response:', err);
+        questions = [
+          "What are the main topics covered in this document?",
+          "Can you explain the key concepts in this PDF?",
+          "What are some practice problems related to this content?",
+        ];
+      }
+
+      // Stream Grok's explanation
+      await askGroqStream(text, res);
+
+      // Send upload and questions as final response
+      res.write(`event: done\ndata: ${JSON.stringify({ upload, questions })}\n\n`);
       res.end();
-      return;
-    }
-    const filePath = path.join(__dirname, '..', req.file.path);
-    let text = await extractTextFromPDF(filePath);
-
-    if (!text || text.length < 20) {
-      console.warn('⚠️ PDF parsing returned too little, using OCR...');
-      text = await extractTextFromPDFWithOCR(filePath);
-    }
-
-    await fs.unlink(filePath).catch((err) => console.error(`Error deleting file ${filePath}:`, err));
-
-    if (!text || text.trim().length < 10) {
-      res.write('event: error\ndata: Failed to extract text from PDF\n\n');
-      res.end();
-      return;
-    }
-
-    await askGroqStream(text, res);
+    });
   } catch (err) {
     console.error('PDF processing error:', err.message, err.stack);
     res.write(`event: error\ndata: Failed to process PDF: ${err.message}\n\n`);
@@ -102,10 +197,94 @@ export const handlePdfUploadStream = async (req, res) => {
   }
 };
 
+// Controller for /recommended-questions (JSON response)
+export const recommendedQuestions = async (req, res) => {
+  try {
+    const { year, semester, module, type, speciality } = req.body;
+    if (!year || !semester || !module || !type) {
+      console.error('Missing required fields:', { year, semester, module, type });
+      return res.status(400).json({ error: 'Year, semester, module, and type are required' });
+    }
+
+    const filters = {
+      year: parseInt(year),
+      semester: parseInt(semester),
+      module,
+      type,
+    };
+    if (speciality) {
+      filters.speciality = speciality;
+    }
+
+    console.log('Fetching uploads with filters:', filters);
+    const uploads = await prisma.upload.findMany({
+      where: filters,
+    });
+    console.log('Found uploads:', uploads.length);
+
+    let context = '';
+    for (const upload of uploads) {
+      try {
+        console.log(`Fetching PDF: ${upload.link}`);
+        const response = await fetch(upload.link);
+        if (!response.ok) {
+          console.error(`Failed to fetch PDF from ${upload.link}: ${response.status}`);
+          continue;
+        }
+        const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        let pdfText = await extractTextFromPDF(buffer);
+        if (!pdfText || pdfText.length < 20) {
+          console.warn(`PDF parsing failed for ${upload.link}, using OCR...`);
+          pdfText = await extractTextFromPDFWithOCR(buffer);
+        }
+        if (pdfText && pdfText.trim().length >= 10) {
+          context += `\n\nPDF Content (${upload.module} - ${upload.type}):\n${pdfText}`;
+        } else {
+          console.warn(`PDF ${upload.link} is empty or unreadable`);
+        }
+      } catch (err) {
+        console.error(`Error processing PDF ${upload.link}:`, err.message);
+      }
+    }
+
+    if (!context) {
+      console.log('No valid PDF content found for question generation');
+      return res.status(200).json({ questions: [] });
+    }
+
+    const questionsPrompt = `Based on the following PDF content for ${module} (${type}):\n${context}\n\nGenerate 3-5 relevant questions that a student might ask about this content. Return the questions as a JSON array, e.g., ["Question 1", "Question 2", "Question 3"].`;
+    console.log('Generating questions with prompt length:', questionsPrompt.length);
+    const questionsResponse = await askGroq(questionsPrompt);
+    let questions = [];
+    try {
+      questions = JSON.parse(questionsResponse);
+      console.log('Generated questions:', questions);
+    } catch (err) {
+      console.error('Error parsing questions response:', err.message, questionsResponse);
+      questions = [
+        "What are the main topics covered in this document?",
+        "Can you explain the key concepts in this PDF?",
+        "What are some practice problems related to this content?",
+      ];
+    }
+
+    res.json({ questions });
+  } catch (err) {
+    console.error('Error in recommendedQuestions:', {
+      message: err.message,
+      stack: err.stack,
+    });
+    res.status(500).json({ error: `Failed to generate recommended questions: ${err.message}` });
+  } finally {
+    await prisma.$disconnect();
+  }
+};
+
 // Controller for /chat (SSE response)
 export const chat = async (req, res) => {
   try {
-    const { message, year, semester, module, type } = req.query;
+    const { message, year, semester, module, type, speciality } = req.query;
     if (!message) {
       return res.status(400).json({ error: 'Message is required' });
     }
@@ -114,30 +293,36 @@ export const chat = async (req, res) => {
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
 
-    // Fetch PDFs from database based on sidebar selections
     let context = '';
     if (year && semester && module && type) {
+      const filters = {
+        year: parseInt(year),
+        semester: parseInt(semester),
+        module,
+        type,
+      };
+      if (speciality) {
+        filters.speciality = speciality;
+      }
+
       const uploads = await prisma.upload.findMany({
-        where: {
-          year: parseInt(year),
-          semester: parseInt(semester),
-          module,
-          type,
-        },
+        where: filters,
       });
 
       for (const upload of uploads) {
         try {
           const response = await fetch(upload.link);
-          const buffer = await response.buffer();
-          const tempFilePath = path.join(__dirname, '..', 'uploads', `temp-${Date.now()}.pdf`);
-          await fs.writeFile(tempFilePath, buffer);
-          let pdfText = await extractTextFromPDF(tempFilePath);
+          if (!response.ok) {
+            console.error(`Failed to fetch PDF from ${upload.link}: ${response.status}`);
+            continue;
+          }
+          const arrayBuffer = await response.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
+          let pdfText = await extractTextFromPDF(buffer);
           if (!pdfText || pdfText.length < 20) {
-            pdfText = await extractTextFromPDFWithOCR(tempFilePath);
+            pdfText = await extractTextFromPDFWithOCR(buffer);
           }
           context += `\n\nPDF Content (${upload.module} - ${upload.type}):\n${pdfText}`;
-          await fs.unlink(tempFilePath).catch((err) => console.error(`Error deleting temp file: ${err}`));
         } catch (err) {
           console.error(`Error fetching PDF from ${upload.link}:`, err);
         }
@@ -161,36 +346,42 @@ export const chat = async (req, res) => {
 
 // Controller for /chat (JSON response, POST)
 export const chatWithGroq = async (req, res) => {
-  const { message, year, semester, module, type } = req.body;
+  const { message, year, semester, module, type, speciality } = req.body;
   if (!message) {
     return res.status(400).json({ error: 'Message is required' });
   }
 
   try {
-    // Fetch PDFs from database based on sidebar selections
     let context = '';
     if (year && semester && module && type) {
+      const filters = {
+        year: parseInt(year),
+        semester: parseInt(semester),
+        module,
+        type,
+      };
+      if (speciality) {
+        filters.speciality = speciality;
+      }
+
       const uploads = await prisma.upload.findMany({
-        where: {
-          year: parseInt(year),
-          semester: parseInt(semester),
-          module,
-          type,
-        },
+        where: filters,
       });
 
       for (const upload of uploads) {
         try {
           const response = await fetch(upload.link);
-          const buffer = await response.buffer();
-          const tempFilePath = path.join(__dirname, '..', 'Uploads', `temp-${Date.now()}.pdf`);
-          await fs.writeFile(tempFilePath, buffer);
-          let pdfText = await extractTextFromPDF(tempFilePath);
+          if (!response.ok) {
+            console.error(`Failed to fetch PDF from ${upload.link}: ${response.status}`);
+            continue;
+          }
+          const arrayBuffer = await response.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
+          let pdfText = await extractTextFromPDF(buffer);
           if (!pdfText || pdfText.length < 20) {
-            pdfText = await extractTextFromPDFWithOCR(tempFilePath);
+            pdfText = await extractTextFromPDFWithOCR(buffer);
           }
           context += `\n\nPDF Content (${upload.module} - ${upload.type}):\n${pdfText}`;
-          await fs.unlink(tempFilePath).catch((err) => console.error(`Error deleting temp file: ${err}`));
         } catch (err) {
           console.error(`Error fetching PDF from ${upload.link}:`, err);
         }
@@ -214,7 +405,6 @@ export const chatWithGroq = async (req, res) => {
 // Controller for /uploads (POST) - Admin only, Cloudinary upload
 export const createUpload = async (req, res) => {
   try {
-    // Apply auth and admin middleware
     await authMiddleware(req, res, async () => {
       await adminMiddleware(req, res, async () => {
         const { year, universityYear, semester, module, type, speciality, solution } = req.body;
@@ -241,10 +431,10 @@ export const createUpload = async (req, res) => {
           return res.status(400).json({ message: `University year must be between 2000 and ${currentYear + 5}` });
         }
 
-        if (year === 4 && !['SID', 'SIL', 'SIQ', 'SIT'].includes(speciality)) {
+        if (year === '4' && !['SID', 'SIL', 'SIQ', 'SIT'].includes(speciality)) {
           return res.status(400).json({ message: 'Speciality must be SID, SIL, SIQ, or SIT for 4th year' });
         }
-        if (year !== 4 && speciality) {
+        if (year !== '4' && speciality) {
           return res.status(400).json({ message: 'Speciality should only be provided for 4th year' });
         }
 
@@ -255,7 +445,7 @@ export const createUpload = async (req, res) => {
         // Upload PDF to Cloudinary
         const filePath = path.join(__dirname, '..', file.path);
         const uploadResult = await cloudinary.uploader.upload(filePath, {
-          folder: 'uploads',
+          folder: 'Uploads',
           resource_type: 'raw',
           public_id: `pdf_${Date.now()}_${file.originalname}`,
         });
@@ -272,7 +462,7 @@ export const createUpload = async (req, res) => {
             semester: Number(semester),
             module,
             type,
-            speciality: year === 4 ? speciality : null,
+            speciality: year === '4' ? speciality : null,
             solution: solution || null,
           },
         });
@@ -291,7 +481,7 @@ export const createUpload = async (req, res) => {
 // Controller for /uploads (GET)
 export const getUploads = async (req, res) => {
   try {
-    const { year, universityYear, semester, type, module } = req.query;
+    const { year, universityYear, semester, type, module, speciality } = req.query;
 
     const filters = {};
     if (year) filters.year = parseInt(year);
@@ -299,7 +489,9 @@ export const getUploads = async (req, res) => {
     if (semester) filters.semester = parseInt(semester);
     if (type) filters.type = type;
     if (module) filters.module = module;
+    if (speciality) filters.speciality = speciality;
 
+    console.log('Fetching uploads with filters:', filters);
     const uploads = await prisma.upload.findMany({
       where: filters,
       orderBy: { createdAt: 'desc' },
@@ -317,33 +509,37 @@ export const getUploads = async (req, res) => {
 // Controller for /uploads/:id (DELETE)
 export const deleteUpload = async (req, res) => {
   try {
-    const uploadId = parseInt(req.params.id);
-    if (isNaN(uploadId)) {
-      return res.status(400).json({ message: 'Invalid or missing upload ID' });
-    }
+    await authMiddleware(req, res, async () => {
+      await adminMiddleware(req, res, async () => {
+        const uploadId = parseInt(req.params.id);
+        if (isNaN(uploadId)) {
+          return res.status(400).json({ message: 'Invalid or missing upload ID' });
+        }
 
-    // Fetch upload to get Cloudinary URL
-    const upload = await prisma.upload.findUnique({
-      where: { id: uploadId },
+        // Fetch upload to get Cloudinary URL
+        const upload = await prisma.upload.findUnique({
+          where: { id: uploadId },
+        });
+
+        if (!upload) {
+          return res.status(404).json({ message: 'Upload not found' });
+        }
+
+        // Extract public_id from Cloudinary URL
+        const publicIdMatch = upload.link.match(/\/Uploads\/(.+)\.pdf$/);
+        if (publicIdMatch) {
+          const publicId = `Uploads/${publicIdMatch[1]}`;
+          await cloudinary.uploader.destroy(publicId, { resource_type: 'raw' });
+        }
+
+        // Delete from database
+        await prisma.upload.delete({
+          where: { id: uploadId },
+        });
+
+        res.json({ message: 'Upload deleted' });
+      });
     });
-
-    if (!upload) {
-      return res.status(404).json({ message: 'Upload not found' });
-    }
-
-    // Extract public_id from Cloudinary URL
-    const publicIdMatch = upload.link.match(/\/Uploads\/(.+)\.pdf$/);
-    if (publicIdMatch) {
-      const publicId = `Uploads/${publicIdMatch[1]}`;
-      await cloudinary.uploader.destroy(publicId, { resource_type: 'raw' });
-    }
-
-    // Delete from database
-    await prisma.upload.delete({
-      where: { id: uploadId },
-    });
-
-    res.json({ message: 'Upload deleted' });
   } catch (err) {
     if (err.code === 'P2025') {
       return res.status(404).json({ message: 'Upload not found' });

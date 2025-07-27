@@ -10,6 +10,7 @@ import "katex/dist/katex.min.css";
 import { API_BASE_URL } from "../../../api";
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
+import axios from 'axios';
 
 const ChatContext = createContext(null);
 
@@ -22,6 +23,7 @@ const ChatProvider = ({ children }) => {
   const [selectedSemester, setSelectedSemester] = useState(null);
   const [selectedSubject, setSelectedSubject] = useState(null);
   const [selectedType, setSelectedType] = useState(null);
+  const [recommendedQuestions, setRecommendedQuestions] = useState([]);
 
   const addMessage = (message, isUser) => {
     setMessages((prev) => [...prev, { text: message, isUser }]);
@@ -62,6 +64,8 @@ const ChatProvider = ({ children }) => {
         setSelectedSubject,
         selectedType,
         setSelectedType,
+        recommendedQuestions,
+        setRecommendedQuestions,
       }}
     >
       {children}
@@ -82,6 +86,9 @@ const Sidebar = () => {
     setSelectedSubject,
     selectedType,
     setSelectedType,
+    recommendedQuestions,
+    setRecommendedQuestions,
+    addMessage,
   } = useContext(ChatContext);
   const [currentView, setCurrentView] = useState("main");
 
@@ -437,6 +444,7 @@ const Sidebar = () => {
     setSelectedSemester(null);
     setSelectedSubject(null);
     setSelectedType(null);
+    setRecommendedQuestions([]);
   };
 
   const handleChildClick = (child) => {
@@ -449,6 +457,7 @@ const Sidebar = () => {
     }
     setSelectedSubject(null);
     setSelectedType(null);
+    setRecommendedQuestions([]);
   };
 
   const handleSemesterClick = (semester) => {
@@ -456,17 +465,18 @@ const Sidebar = () => {
     setCurrentView("subjects");
     setSelectedSubject(null);
     setSelectedType(null);
+    setRecommendedQuestions([]);
   };
 
   const handleSubjectClick = (subject) => {
     setSelectedSubject(subject);
     setCurrentView("subject-details");
     setSelectedType(null);
+    setRecommendedQuestions([]);
   };
 
-  const handleTypeClick = (type) => {
+  const handleTypeClick = async (type) => {
     setSelectedType(type);
-    // Notify user that PDFs are being loaded into the AI context
     toast.info(`Loading ${type.title} PDFs for ${selectedSubject.title}`, {
       position: 'bottom-right',
       autoClose: 3000,
@@ -476,6 +486,64 @@ const Sidebar = () => {
       draggable: true,
       theme: 'dark',
     });
+
+    // Fetch PDFs from the database based on selections
+    try {
+      const queryParams = {
+        year: selectedCourse.year,
+        semester: selectedSemester.semester,
+        module: selectedSubject.id,
+        type: type.id,
+      };
+      if (selectedChild && selectedChild.speciality) {
+        queryParams.speciality = selectedChild.speciality;
+      }
+
+      // Fetch PDFs
+      const response = await axios.get(`${API_BASE_URL}/chat/uploads`, {
+        params: queryParams,
+      });
+
+      const uploads = response.data;
+      if (uploads.length === 0) {
+        toast.warn('No PDFs found for the selected criteria', {
+          position: 'bottom-right',
+          autoClose: 3000,
+          theme: 'dark',
+        });
+        setRecommendedQuestions([]);
+        return;
+      }
+
+      // Notify chatbot of loaded PDFs
+      const pdfLinks = uploads.map((upload) => upload.link).join(', ');
+      const message = `Loaded PDFs for ${selectedSubject.title} (${type.title}): ${pdfLinks}`;
+      addMessage(message, false);
+
+      // Generate recommended questions
+      const questionResponse = await axios.post(`${API_BASE_URL}/chat/recommended-questions`, {
+        year: selectedCourse.year,
+        semester: selectedSemester.semester,
+        module: selectedSubject.id,
+        type: type.id,
+        speciality: selectedChild?.speciality || null,
+      });
+
+      setRecommendedQuestions(questionResponse.data.questions || []);
+      toast.success(`Loaded ${uploads.length} PDFs and generated recommended questions`, {
+        position: 'bottom-right',
+        autoClose: 3000,
+        theme: 'dark',
+      });
+    } catch (err) {
+      console.error('Error fetching PDFs or questions:', err);
+      toast.error('Failed to load PDFs or generate questions', {
+        position: 'bottom-right',
+        autoClose: 3000,
+        theme: 'dark',
+      });
+      setRecommendedQuestions([]);
+    }
   };
 
   const handleBack = () => {
@@ -483,29 +551,35 @@ const Sidebar = () => {
       setCurrentView("subjects");
       setSelectedSubject(null);
       setSelectedType(null);
+      setRecommendedQuestions([]);
     } else if (currentView === "subjects") {
       if (selectedChild && selectedChild.type === "optional") {
         setCurrentView("children");
         setSelectedSemester(null);
         setSelectedType(null);
+        setRecommendedQuestions([]);
       } else if (selectedChild) {
         setCurrentView("semesters");
         setSelectedSemester(null);
         setSelectedType(null);
+        setRecommendedQuestions([]);
       } else if (selectedCourse) {
         setCurrentView("semesters");
         setSelectedSemester(null);
         setSelectedType(null);
+        setRecommendedQuestions([]);
       }
     } else if (currentView === "semesters") {
       if (selectedChild) {
         setCurrentView("children");
         setSelectedChild(null);
         setSelectedType(null);
+        setRecommendedQuestions([]);
       } else {
         setCurrentView("main");
         setSelectedCourse(null);
         setSelectedType(null);
+        setRecommendedQuestions([]);
       }
       setSelectedSemester(null);
     } else if (currentView === "children") {
@@ -513,6 +587,7 @@ const Sidebar = () => {
       setSelectedCourse(null);
       setSelectedChild(null);
       setSelectedType(null);
+      setRecommendedQuestions([]);
     }
   };
 
@@ -713,6 +788,30 @@ const Sidebar = () => {
                 ))}
               </motion.div>
             )}
+            {recommendedQuestions.length > 0 && (
+              <motion.div
+                key="recommended-questions"
+                className="mt-4 space-y-2"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.3 }}
+              >
+                <h3 className="text-sm font-semibold text-gray-400">Recommended Questions:</h3>
+                {recommendedQuestions.map((question, index) => (
+                  <motion.button
+                    key={index}
+                    className="inline-flex items-center whitespace-normal rounded-xl text-sm font-medium px-4 py-2 w-full justify-start text-gray-400 hover:bg-gray-900 hover:text-gray-100 transition-colors duration-200 shadow-sm"
+                    onClick={() => {
+                      addMessage(question, true);
+                      handleSubmit({ preventDefault: () => {} });
+                    }}
+                    whileHover={{ scale: 1.02 }}
+                  >
+                    {question}
+                  </motion.button>
+                ))}
+              </motion.div>
+            )}
           </AnimatePresence>
           <div className="mt-auto pt-4">
             <button className="inline-flex items-center whitespace-nowrap rounded-xl text-sm font-medium h-10 px-4 py-2 w-full justify-start text-gray-400 hover:bg-gray-900 hover:text-gray-100 shadow-sm">
@@ -804,9 +903,19 @@ const ChatMessage = ({ text, isUser }) => (
 );
 
 const ChatInput = () => {
-  const { addMessage, updateLastMessage, selectedCourse, selectedChild, selectedSemester, selectedSubject, selectedType } = useContext(ChatContext);
+  const {
+    addMessage,
+    updateLastMessage,
+    selectedCourse,
+    selectedChild,
+    selectedSemester,
+    selectedSubject,
+    selectedType,
+    setRecommendedQuestions,
+  } = useContext(ChatContext);
   const [input, setInput] = useState('');
   const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -816,14 +925,15 @@ const ChatInput = () => {
       setError('Please enter a message');
       return;
     }
+    if (isSubmitting) return;
 
+    setIsSubmitting(true);
     const userMessage = input.trim();
     addMessage(userMessage, true);
     setInput('');
     setError('');
 
     try {
-      addMessage('', false);
       const queryParams = new URLSearchParams({
         message: userMessage,
       });
@@ -839,7 +949,7 @@ const ChatInput = () => {
       }
 
       const eventSource = new EventSource(
-        `${API_BASE_URL}/chat/chat?${queryParams.toString()}`
+        `${API_BASE_URL}/chat?${queryParams.toString()}`
       );
 
       let streamedReply = '';
@@ -847,6 +957,7 @@ const ChatInput = () => {
       eventSource.onmessage = (event) => {
         if (event.data === '[DONE]') {
           eventSource.close();
+          setIsSubmitting(false);
           return;
         }
         streamedReply += event.data + ' ';
@@ -857,6 +968,7 @@ const ChatInput = () => {
         console.error('SSE error:', err);
         updateLastMessage('⚠️ Error receiving stream');
         eventSource.close();
+        setIsSubmitting(false);
         toast.error('Failed to receive chat response', {
           position: 'bottom-right',
           autoClose: 3000,
@@ -870,10 +982,12 @@ const ChatInput = () => {
 
       eventSource.addEventListener('done', () => {
         eventSource.close();
+        setIsSubmitting(false);
       });
     } catch (err) {
       console.error('Chat error:', err);
       updateLastMessage('⚠️ Error initiating chat');
+      setIsSubmitting(false);
       toast.error('Failed to initiate chat', {
         position: 'bottom-right',
         autoClose: 3000,
@@ -898,53 +1012,40 @@ const ChatInput = () => {
       return;
     }
 
+    if (!selectedCourse || !selectedSemester || !selectedSubject || !selectedType) {
+      setError('Please select year, semester, module, and type before uploading');
+      return;
+    }
+
+    setIsSubmitting(true);
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('year', selectedCourse.year);
+    formData.append('universityYear', new Date().getFullYear());
+    formData.append('semester', selectedSemester.semester);
+    formData.append('module', selectedSubject.id);
+    formData.append('type', selectedType.id);
+    if (selectedChild && selectedChild.speciality) {
+      formData.append('speciality', selectedChild.speciality);
+    }
 
-    addMessage(`📄 Uploaded PDF: ${file.name}`, true);
+    addMessage(`📄 Uploading PDF: ${file.name}`, true);
     addMessage('', false);
     setError('');
 
     try {
-      const response = await fetch(`${API_BASE_URL}/chat/upload-pdf`, {
-        method: 'POST',
-        body: formData,
+      const token = localStorage.getItem('token');
+      const response = await axios.post(`${API_BASE_URL}/upload-pdf`, formData, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'multipart/form-data',
+        },
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to upload PDF');
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder('utf-8');
-      let streamedReply = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-        const events = chunk.split('\n\n');
-
-        for (const event of events) {
-          if (event.startsWith('data:')) {
-            const word = event.replace('data: ', '').trim();
-            if (word === '[DONE]') {
-              break;
-            }
-            streamedReply += word + ' ';
-            updateLastMessage(streamedReply.trim());
-          } else if (event.startsWith('event: done')) {
-            break;
-          } else if (event.startsWith('event: error')) {
-            const errorMsg = event.replace('event: error\ndata: ', '').trim();
-            throw new Error(errorMsg || 'Failed to process PDF');
-          }
-        }
-      }
-
-      toast.success('PDF processed successfully', {
+      const { upload, questions } = response.data;
+      updateLastMessage(`PDF uploaded successfully: ${upload.link}`);
+      setRecommendedQuestions(questions || []);
+      toast.success('PDF uploaded and processed successfully', {
         position: 'bottom-right',
         autoClose: 3000,
         hideProgressBar: false,
@@ -956,7 +1057,7 @@ const ChatInput = () => {
     } catch (err) {
       console.error('PDF upload error:', err);
       updateLastMessage('⚠️ Error uploading PDF');
-      toast.error(err.message || 'Failed to upload PDF', {
+      toast.error(err.response?.data?.message || 'Failed to upload PDF', {
         position: 'bottom-right',
         autoClose: 5000,
         hideProgressBar: false,
@@ -965,10 +1066,20 @@ const ChatInput = () => {
         draggable: true,
         theme: 'dark',
       });
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const triggerFileInput = () => {
+    if (!selectedCourse || !selectedSemester || !selectedSubject || !selectedType) {
+      toast.error('Please select year, semester, module, and type before uploading', {
+        position: 'bottom-right',
+        autoClose: 3000,
+        theme: 'dark',
+      });
+      return;
+    }
     fileInputRef.current.click();
   };
 
@@ -991,18 +1102,20 @@ const ChatInput = () => {
                 setInput(e.target.value);
                 setError('');
               }}
-              placeholder="Type your message..."
+              placeholder="Type your message or select a recommended question..."
               className="flex-1 outline-none px-3 py-2 bg-transparent text-gray-100 placeholder-gray-500 focus:ring-0 text-sm border-none"
               aria-invalid={error ? 'true' : 'false'}
               aria-describedby={error ? 'chat-error' : undefined}
+              disabled={isSubmitting}
             />
             <motion.button
               type="submit"
               className="inline-flex items-center justify-center whitespace-nowrap rounded-xl text-sm font-medium h-10 px-4 py-2 bg-gradient-to-r from-gray-700 to-black text-gray-100 hover:from-gray-800 hover:to-black shadow-md"
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
+              disabled={isSubmitting}
             >
-              Send
+              {isSubmitting ? 'Sending...' : 'Send'}
             </motion.button>
             <motion.button
               type="button"
@@ -1010,6 +1123,7 @@ const ChatInput = () => {
               className="inline-flex items-center justify-center whitespace-nowrap rounded-xl text-sm font-medium h-10 px-4 py-2 bg-gradient-to-r from-gray-700 to-black text-gray-100 hover:from-gray-800 hover:to-black shadow-md"
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
+              disabled={isSubmitting}
             >
               <Upload className="h-4 w-4 mr-2" /> Upload PDF
             </motion.button>
@@ -1075,7 +1189,7 @@ const HamburgerToggle = () => {
 };
 
 const ChatPage = () => {
-  const { messages } = useContext(ChatContext);
+  const { messages, recommendedQuestions } = useContext(ChatContext);
   const messagesEndRef = useRef(null);
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -1087,7 +1201,7 @@ const ChatPage = () => {
       <div className="flex-1 flex flex-col">
         <HamburgerToggle />
         <div className="flex-1 p-6 overflow-hidden flex flex-col pt-16">
-          {messages.length === 0 && <Quote />}
+          {messages.length === 0 && recommendedQuestions.length === 0 && <Quote />}
           <div className="h-full pr-4 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-black">
             {messages.map((msg, index) => (
               <ChatMessage key={index} text={msg.text} isUser={msg.isUser} />

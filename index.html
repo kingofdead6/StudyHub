@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ModelsLab Image Generator</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      background-color: #f0f0f0;
+    }
+    h1 {
+      text-align: center;
+      color: #333;
+    }
+    .container {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+    label {
+      display: block;
+      margin: 10px 0 5px;
+      font-weight: bold;
+    }
+    input, select, button {
+      width: 100%;
+      padding: 10px;
+      margin-bottom: 10px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 16px;
+    }
+    button {
+      background-color: #007bff;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+    button:disabled {
+      background-color: #6c757d;
+      cursor: not-allowed;
+    }
+    #imageOutput {
+      margin-top: 20px;
+      text-align: center;
+    }
+    #imageOutput img {
+      max-width: 45%;
+      margin: 5px;
+      border-radius: 8px;
+    }
+    .download-btn {
+      display: block;
+      margin: 5px auto;
+      padding: 5px 10px;
+      background-color: #28a745;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .download-btn:hover {
+      background-color: #218838;
+    }
+    #responseOutput {
+      margin-top: 20px;
+      padding: 10px;
+      background: #f8f9fa;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      white-space: pre-wrap;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    #error {
+      color: red;
+      margin-top: 10px;
+    }
+    #loading {
+      display: none;
+      margin-top: 10px;
+      color: #007bff;
+    }
+  </style>
+</head>
+<body>
+  <h1>ModelsLab Image Generator</h1>
+  <div class="container">
+    <label for="prompt">Image Prompt:</label>
+    <input type="text" id="prompt" placeholder="Enter your image prompt" value="A stunningly beautiful young woman with a petite, curvaceous figure, lounging seductively on a plush velvet chaise in a dimly lit, opulent boudoir. She is nude, her body glistening with a subtle sheen of scented oil, posed provocatively with one leg draped over the chaise, revealing her intimate form in an alluring, confident manner. Her long, flowing hair cascades over her shoulders, framing her flawless, radiant skin. The scene is ultra-realistic, cinematic, with hyper-detailed textures, soft candlelight casting delicate shadows, and a sultry, captivating expression. Photorealistic, 8K resolution, sensual ambiance, inspired by high-end erotic fine-art photography.">   
+    <label for="samples">Number of Images:</label>
+    <select id="samples">
+      <option value="1">1</option>
+      <option value="2">2</option>
+      <option value="3">3</option>
+      <option value="4">4</option>
+    </select>
+    <button id="generateButton" onclick="generateImage()">Generate Image</button>
+    <div id="loading">Generating image, please wait...</div>
+    <div id="imageOutput"></div>
+    <div id="responseOutput"></div>
+    <div id="error"></div>
+  </div>
+
+  <script>
+    async function generateImage() {
+      const prompt = document.getElementById('prompt').value;
+      const safetyChecker = document.getElementById('safetyChecker').value === 'true';
+      const samples = document.getElementById('samples').value;
+      const generateButton = document.getElementById('generateButton');
+      const loading = document.getElementById('loading');
+      const imageOutput = document.getElementById('imageOutput');
+      const responseOutput = document.getElementById('responseOutput');
+      const errorOutput = document.getElementById('error');
+
+      // Clear previous outputs
+      imageOutput.innerHTML = '';
+      responseOutput.textContent = '';
+      errorOutput.textContent = '';
+      loading.style.display = 'block';
+      generateButton.disabled = true;
+
+      if (!prompt) {
+        errorOutput.textContent = 'Please enter a prompt.';
+        loading.style.display = 'none';
+        generateButton.disabled = false;
+        return;
+      }
+
+      const payload = {
+        key: 'QCaWdck5VIS8ztvueyFkmMcjNTUrJ1wiKYkHqnVsImcy0z4GvpwB2wZx3ZYK',
+        model_id: 'dreamshaper-xl-v2-turbo',
+        prompt: prompt,
+        negative_prompt: 'blurry, bad anatomy, extra limbs, deformed, low quality, pixelated, distorted face, unnatural proportions, unrealistic shadows, overexposed, underexposed, watermark, text, logos, crowded background, juvenile features, non-consensual, poor lighting, unbalanced composition',
+        width: '512',
+        height: '512',
+        samples: samples,
+        num_inference_steps: '60',
+        safety_checker: safetyChecker,
+        enhance_prompt: true,
+        seed: null,
+        guidance_scale: 7.5,
+        scheduler: 'UniPCMultistepScheduler'
+      };
+
+      try {
+        const response = await fetch('https://modelslab.com/api/v6/realtime/text2img', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(payload)
+        });
+
+        const result = await response.json();
+        console.log('API Response:', result);
+
+        if (result.status === 'success' && result.output && result.output.length > 0) {
+          imageOutput.innerHTML = result.output.map((url, index) => `
+            <div>
+              <img src="${url}" alt="Generated Image">
+              <button class="download-btn" onclick="downloadImage('${url}', 'image_${index + 1}.png')">Download Image</button>
+            </div>
+          `).join('');
+          responseOutput.textContent = JSON.stringify(result, null, 2);
+        } else if (result.status === 'processing' && result.fetch_result) {
+          errorOutput.textContent = `Image processing, fetching after ${result.eta} seconds...`;
+          setTimeout(async () => {
+            try {
+              const fetchResponse = await fetch(result.fetch_result, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key: payload.key })
+              });
+              const fetchResult = await fetchResponse.json();
+              if (fetchResult.status === 'success' && fetchResult.output && fetchResult.output.length > 0) {
+                imageOutput.innerHTML = fetchResult.output.map((url, index) => `
+                  <div>
+                    <img src="${url}" alt="Generated Image">
+                    <button class="download-btn" onclick="downloadImage('${url}', 'image_${index + 1}.png')">Download Image</button>
+                  </div>
+                `).join('');
+                responseOutput.textContent = JSON.stringify(fetchResult, null, 2);
+              } else {
+                errorOutput.textContent = `Fetch Error: ${fetchResult.message || 'No image fetched.'}`;
+              }
+            } catch (error) {
+              errorOutput.textContent = `Fetch Error: ${error.message}`;
+            }
+          }, (result.eta || 5) * 1000);
+        } else {
+          errorOutput.textContent = `Error: ${result.message || 'No image generated. Check API response.'}`;
+          responseOutput.textContent = JSON.stringify(result, null, 2);
+        }
+      } catch (error) {
+        errorOutput.textContent = `Network Error: ${error.message}`;
+      } finally {
+        loading.style.display = 'none';
+        generateButton.disabled = false;
+      }
+    }
+
+    function downloadImage(url, filename) {
+      fetch(url)
+        .then(response => response.blob())
+        .then(blob => {
+          const link = document.createElement('a');
+          link.href = URL.createObjectURL(blob);
+          link.download = filename;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        })
+        .catch(error => {
+          console.error('Download failed:', error);
+          document.getElementById('error').textContent = `Download Error: ${error.message}`;
+        });
+    }
+  </script>
+</body>
+</html>

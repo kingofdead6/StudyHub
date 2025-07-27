@@ -70,8 +70,14 @@ const AdminUploads = () => {
   const yearRange = Array.from({ length: currentYear - 2000 + 6 }, (_, i) => 2000 + i);
 
   const fetchUploads = useCallback(async (applyFilters = false) => {
+    console.log('Starting fetchUploads, applyFilters:', applyFilters);
     try {
       const token = localStorage.getItem('token');
+      if (!token) {
+        console.error('No auth token found');
+        throw new Error('No authentication token found');
+      }
+
       let query = '';
       if (applyFilters) {
         query = new URLSearchParams({
@@ -88,7 +94,12 @@ const AdminUploads = () => {
         headers: { 'Authorization': `Bearer ${token}` }
       });
 
-      console.log('Uploads response:', response.data);
+      console.log('Uploads response received:', {
+        status: response.status,
+        dataLength: response.data.length,
+        data: response.data
+      });
+
       response.data.forEach(upload => {
         console.log(`Upload: id=${upload.id}, link=${upload.link}, module=${upload.module}, type=${upload.type}`);
       });
@@ -108,7 +119,13 @@ const AdminUploads = () => {
         theme: 'dark',
       });
     } catch (error) {
-      console.error('Fetch uploads error:', error.response || error);
+      console.error('Fetch uploads error:', {
+        message: error.message,
+        response: error.response ? {
+          status: error.response.status,
+          data: error.response.data
+        } : 'No response data'
+      });
       const message = error.response?.data?.message || 'Failed to load uploads. Please try again.';
       setError(message);
       setLoading(false);
@@ -133,8 +150,13 @@ const AdminUploads = () => {
 
   const handleFileChange = (e) => {
     const file = e.target.files[0];
-    console.log('File selected:', file ? file.name : 'No file');
+    console.log('File selected:', file ? {
+      name: file.name,
+      size: file.size,
+      type: file.type
+    } : 'No file');
     if (file && file.type !== 'application/pdf') {
+      console.warn('Invalid file type:', file.type);
       setFormError('Please upload a PDF file');
       return;
     }
@@ -151,41 +173,63 @@ const AdminUploads = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    console.log('Form submission started', formData);
+
     if (!formData.file || !formData.year || !formData.universityYear || !formData.semester || !formData.module || !formData.type) {
+      console.warn('Validation failed: Missing required fields', formData);
       setFormError('All required fields must be provided');
       return;
     }
+
     if (!['1', '2'].includes(formData.semester)) {
+      console.warn('Validation failed: Invalid semester', formData.semester);
       setFormError('Semester must be 1 or 2');
       return;
     }
+
     if (!['1', '2', '3', '4', '5'].includes(formData.year)) {
+      console.warn('Validation failed: Invalid year', formData.year);
       setFormError('Academic year must be between 1 and 5');
       return;
     }
+
     if (!yearRange.includes(Number(formData.universityYear))) {
+      console.warn('Validation failed: Invalid universityYear', formData.universityYear);
       setFormError(`University year must be between 2000 and ${currentYear + 5}`);
       return;
     }
+
     if (!['Course', 'TD', 'EMD'].includes(formData.type)) {
+      console.warn('Validation failed: Invalid type', formData.type);
       setFormError('Type must be Course, TD, or EMD');
       return;
     }
+
     if (formData.year === '4' && !['SID', 'SIL', 'SIQ', 'SIT'].includes(formData.speciality)) {
+      console.warn('Validation failed: Invalid speciality for 4th year', formData.speciality);
       setFormError('Speciality must be SID, SIL, SIQ, or SIT for 4th year');
       return;
     }
+
     if (formData.year !== '4' && formData.speciality) {
+      console.warn('Validation failed: Speciality provided for non-4th year', formData.speciality);
       setFormError('Speciality should only be provided for 4th year');
       return;
     }
+
     if (formData.solution && !formData.solution.startsWith('https://drive.google.com/')) {
+      console.warn('Validation failed: Invalid solution link', formData.solution);
       setFormError('Solution must be a valid Google Drive link');
       return;
     }
 
     try {
       const token = localStorage.getItem('token');
+      if (!token) {
+        console.error('No auth token found');
+        throw new Error('No authentication token found');
+      }
+
       const data = new FormData();
       data.append('file', formData.file);
       data.append('year', parseInt(formData.year));
@@ -206,10 +250,16 @@ const AdminUploads = () => {
       }
 
       const response = await axios.post(`${API_BASE_URL}/admin/uploads`, data, {
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'multipart/form-data'
+        }
       });
 
-      console.log('Upload response:', response.data);
+      console.log('Upload response:', {
+        status: response.status,
+        data: response.data
+      });
 
       setUploads([response.data.upload, ...uploads]);
       setFilteredUploads([response.data.upload, ...filteredUploads]);
@@ -226,7 +276,13 @@ const AdminUploads = () => {
         theme: 'dark',
       });
     } catch (error) {
-      console.error('Submit error:', error.response || error);
+      console.error('Submit error:', {
+        message: error.message,
+        response: error.response ? {
+          status: error.response.status,
+          data: error.response.data
+        } : 'No response data'
+      });
       const message = error.response?.data?.message || 'Failed to add upload. Please try again.';
       setFormError(message);
       toast.error(message, {
@@ -242,11 +298,20 @@ const AdminUploads = () => {
   };
 
   const handleDelete = async (uploadId) => {
-    if (!window.confirm('Are you sure you want to delete this upload?')) return;
+    console.log('Initiating delete for upload:', uploadId);
+    if (!window.confirm('Are you sure you want to delete this upload?')) {
+      console.log('Delete cancelled by user');
+      return;
+    }
 
     try {
       const token = localStorage.getItem('token');
-      console.log('Deleting upload:', uploadId);
+      if (!token) {
+        console.error('No auth token found');
+        throw new Error('No authentication token found');
+      }
+
+      console.log('Sending delete request for upload:', uploadId);
       await axios.delete(`${API_BASE_URL}/admin/uploads/${uploadId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -265,7 +330,13 @@ const AdminUploads = () => {
         theme: 'dark',
       });
     } catch (error) {
-      console.error('Delete error:', error.response || error);
+      console.error('Delete error:', {
+        message: error.message,
+        response: error.response ? {
+          status: error.response.status,
+          data: error.response.data
+        } : 'No response data'
+      });
       const message = error.response?.data?.message || 'Failed to delete upload. Please try again.';
       toast.error(message, {
         position: 'bottom-right',
@@ -280,26 +351,31 @@ const AdminUploads = () => {
   };
 
   const applyFilters = useCallback(() => {
+    console.log('Applying filters, filtersApplied:', filtersApplied, 'filterData:', filterData);
     if (!filtersApplied) {
-      console.log('Skipping filters: no filters applied');
+      console.log('No filters applied, resetting to all uploads');
       setFilteredUploads(uploads);
       return;
     }
-    console.log('Applying filters:', filterData);
+
     let filtered = [...uploads];
     if (filterData.year) {
       filtered = filtered.filter(upload => upload.year === parseInt(filterData.year));
+      console.log('Filtered by year:', filterData.year, 'Results:', filtered.length);
     }
     if (filterData.semester) {
       filtered = filtered.filter(upload => upload.semester === parseInt(filterData.semester));
+      console.log('Filtered by semester:', filterData.semester, 'Results:', filtered.length);
     }
     if (filterData.type) {
       filtered = filtered.filter(upload => upload.type === filterData.type);
+      console.log('Filtered by type:', filterData.type, 'Results:', filtered.length);
     }
     if (filterData.module) {
       filtered = filtered.filter(upload => upload.module && upload.module.toLowerCase().includes(filterData.module.toLowerCase()));
+      console.log('Filtered by module:', filterData.module, 'Results:', filtered.length);
     }
-    console.log('Filtered uploads:', { count: filtered.length, uploads: filtered.map(u => ({ id: u.id, link: u.link })) });
+    console.log('Final filtered uploads:', { count: filtered.length, uploads: filtered.map(u => ({ id: u.id, link: u.link })) });
     setFilteredUploads(filtered);
   }, [filterData, uploads, filtersApplied]);
 
@@ -309,174 +385,210 @@ const AdminUploads = () => {
   };
 
   useEffect(() => {
+    console.log('Initial fetchUploads triggered');
     fetchUploads();
   }, [fetchUploads]);
 
   useEffect(() => {
+    console.log('applyFilters effect triggered');
     applyFilters();
   }, [applyFilters]);
 
   useEffect(() => {
-    console.log('Current state:', { uploads: uploads.length, filteredUploads: filteredUploads.length });
+    console.log('State change detected:', { uploads: uploads.length, filteredUploads: filteredUploads.length });
   }, [uploads, filteredUploads]);
 
   return (
-    <div className="min-h-screen bg-black text-gray-100 p-6">
+    <div className="min-h-screen text-gray-100 p-6">
       <ToastContainer />
       <h1 className="text-3xl font-bold text-center mb-8 bg-gradient-to-r from-gray-400 to-gray-600 bg-clip-text text-transparent">
         Manage Uploads
       </h1>
 
       {/* Filters */}
-      <div className="mb-6 flex flex-wrap gap-4">
-        <div className="flex-1 min-w-[150px]">
-          <input
+      <motion.div
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
+        className="mb-6 flex flex-wrap gap-4"
+      >
+        <motion.div variants={itemVariants} className="flex-1 min-w-[150px]">
+          <motion.input
             type="number"
             name="year"
             value={filterData.year}
             onChange={handleFilterChange}
             placeholder="Filter by Academic Year"
             className="w-full p-2 rounded bg-gray-800 text-gray-100 border border-gray-700 focus:outline-none"
+            variants={inputVariants}
+            whileHover="hover"
+            whileFocus="focus"
           />
-        </div>
-        <div className="flex-1 min-w-[150px]">
-          <select
+        </motion.div>
+        <motion.div variants={itemVariants} className="flex-1 min-w-[150px]">
+          <motion.select
             name="semester"
             value={filterData.semester}
             onChange={handleFilterChange}
             className="w-full p-2 rounded bg-gray-800 text-gray-100 border border-gray-700 focus:outline-none"
+            variants={inputVariants}
+            whileHover="hover"
+            whileFocus="focus"
           >
             <option value="">Filter by Semester</option>
             <option value="1">Semester 1</option>
             <option value="2">Semester 2</option>
-          </select>
-        </div>
-        <div className="flex-1 min-w-[150px]">
-          <select
+          </motion.select>
+        </motion.div>
+        <motion.div variants={itemVariants} className="flex-1 min-w-[150px]">
+          <motion.select
             name="type"
             value={filterData.type}
             onChange={handleFilterChange}
             className="w-full p-2 rounded bg-gray-800 text-gray-100 border border-gray-700 focus:outline-none"
+            variants={inputVariants}
+            whileHover="hover"
+            whileFocus="focus"
           >
             <option value="">Filter by Type</option>
             <option value="Course">Course</option>
             <option value="TD">TD</option>
             <option value="EMD">EMD</option>
-          </select>
-        </div>
-        <div className="flex-1 min-w-[150px]">
-          <input
+          </motion.select>
+        </motion.div>
+        <motion.div variants={itemVariants} className="flex-1 min-w-[150px]">
+          <motion.input
             type="text"
             name="module"
             value={filterData.module}
             onChange={handleFilterChange}
             placeholder="Filter by Module"
             className="w-full p-2 rounded bg-gray-800 text-gray-100 border border-gray-700 focus:outline-none"
+            variants={inputVariants}
+            whileHover="hover"
+            whileFocus="focus"
           />
-        </div>
-        <button
+        </motion.div>
+        <motion.button
+          variants={itemVariants}
           className="p-2 rounded bg-gradient-to-r from-gray-700 to-black text-gray-100"
           onClick={() => fetchUploads(true)}
         >
           <FaSearch />
-        </button>
-      </div>
+        </motion.button>
+      </motion.div>
 
       {/* Add Upload Button */}
-      <div className="mb-6">
+      <motion.div
+        variants={itemVariants}
+        className="mb-6"
+      >
         <button
           className="flex items-center gap-2 p-2 rounded bg-gradient-to-r from-gray-700 to-black text-gray-100"
           onClick={() => setIsAddPopupOpen(true)}
         >
           <FaPlus /> Add New Upload
         </button>
-      </div>
+      </motion.div>
 
       {/* Error Message */}
       {error && (
-        <div className="flex items-center gap-2 text-red-400 mb-4">
+        <motion.div
+          variants={itemVariants}
+          className="flex items-center gap-2 text-red-400 mb-4"
+        >
           <FaExclamationTriangle /> {error}
-        </div>
+        </motion.div>
       )}
 
       {/* Loading State */}
       {loading && (
-        <div className="text-center text-gray-400">
+        <motion.div
+          variants={itemVariants}
+          className="text-center text-gray-400"
+        >
           Loading...
-        </div>
+        </motion.div>
       )}
 
       {/* Uploads List */}
       {!loading && filteredUploads.length === 0 && (
-        <div className="text-center text-gray-400">
+        <motion.div
+          variants={itemVariants}
+          className="text-center text-gray-400"
+        >
           No uploads found.
-        </div>
+        </motion.div>
       )}
 
       {!loading && filteredUploads.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" style={{ border: '2px solid red' }}>
-          {filteredUploads.map((upload) => {
-            console.log('Rendering upload:', upload);
-            return (
-              <div
-                key={upload.id}
-                className="p-4 rounded bg-gray-800 border border-gray-700 flex flex-col justify-between"
-                style={{ border: '2px solid green', minHeight: '200px' }}
-              >
-                <div>
-                  <div className="flex items-center gap-2 mb-2">
-                    <FaFilePdf className="text-red-400" />
+        <motion.div
+          variants={containerVariants}
+          initial="hidden"
+          animate="visible"
+          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
+        >
+          {filteredUploads.map((upload) => (
+            <motion.div
+              key={upload.id}
+              variants={itemVariants}
+              className="p-4 rounded bg-gray-800 border border-gray-700 flex flex-col justify-between"
+              style={{ minHeight: '200px' }}
+            >
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <FaFilePdf className="text-red-400" />
+                  <a
+                    href={upload.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-gray-100 hover:underline"
+                  >
+                    {upload.module || 'Unknown Module'} ({upload.type || 'Unknown Type'})
+                  </a>
+                </div>
+                <p className="text-sm text-gray-400">Year: {upload.year || 'N/A'}</p>
+                <p className="text-sm text-gray-400">University Year: {upload.universityYear || 'N/A'}</p>
+                <p className="text-sm text-gray-400">Semester: {upload.semester || 'N/A'}</p>
+                {upload.speciality && (
+                  <p className="text-sm text-gray-400">Speciality: {upload.speciality}</p>
+                )}
+                {upload.solution && (
+                  <p className="text-sm text-gray-400">
+                    Solution:{' '}
                     <a
-                      href={upload.link}
+                      href={upload.solution}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-gray-100 hover:underline"
+                      className="hover:underline"
                     >
-                      {upload.module || 'Unknown Module'} ({upload.type || 'Unknown Type'})
+                      Google Drive
                     </a>
-                  </div>
-                  <p className="text-sm text-gray-400">Year: {upload.year || 'N/A'}</p>
-                  <p className="text-sm text-gray-400">University Year: {upload.universityYear || 'N/A'}</p>
-                  <p className="text-sm text-gray-400">Semester: {upload.semester || 'N/A'}</p>
-                  {upload.speciality && (
-                    <p className="text-sm text-gray-400">Speciality: {upload.speciality}</p>
-                  )}
-                  {upload.solution && (
-                    <p className="text-sm text-gray-400">
-                      Solution:{' '}
-                      <a
-                        href={upload.solution}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="hover:underline"
-                      >
-                        Google Drive
-                      </a>
-                    </p>
-                  )}
-                  <button
-                    onClick={() => testLink(upload.link)}
-                    className="mt-2 p-2 rounded bg-blue-600 text-white"
-                  >
-                    Test PDF Link
-                  </button>
-                </div>
-                <button
-                  className="mt-4 p-2 rounded bg-red-600 text-white flex items-center gap-2 justify-center"
-                  onClick={() => handleDelete(upload.id)}
-                >
-                  <FaTrash /> Delete
-                </button>
+                  </p>
+                )}
+               
               </div>
-            );
-          })}
-        </div>
+              <button
+                className="mt-4 p-2 rounded bg-red-600 text-white flex items-center gap-2 justify-center"
+                onClick={() => handleDelete(upload.id)}
+              >
+                <FaTrash /> Delete
+              </button>
+            </motion.div>
+          ))}
+        </motion.div>
       )}
 
       {/* Add Upload Popup */}
       <AnimatePresence>
         {isAddPopupOpen && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <motion.div
+            variants={popupVariants}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+            className="fixed inset-0 bg-black/40 backdrop-blur-md flex items-center justify-center z-50"
+          >
             <div className="bg-gray-900 p-6 rounded-lg w-full max-w-md">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-xl font-bold text-gray-100">Add New Upload</h2>
@@ -583,7 +695,7 @@ const AdminUploads = () => {
                 </div>
               </form>
             </div>
-          </div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 import AuthRoutes from './Routes/AuthRoutes.js';
 import AdminRoutes from './Routes/AdminRoutes.js';
 import contactRoutes from './Routes/contactRoutes.js';
-import ChatRoutes from './routes/ChatRoutes.js';
+import ChatRoutes from './Routes/ChatRoutes.js';
 
 dotenv.config();
 
