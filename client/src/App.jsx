@@ -9,6 +9,7 @@ import AdminUploads from "./component/Admin/AdminUploads";
 import AdminContact from "./component/Admin/AdminContact";
 import NotFound from "./pages/NotFound";
 import ChatPageWithProvider from "./component/AiBot/ChatPage";
+import Courses from "./component/AiBot/Courses";
 
 
 
@@ -20,6 +21,7 @@ function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/chat" element={<ChatPageWithProvider />} />
+          <Route path="/courses" element={<Courses /> } />
        <Route path="/admin-dashboard" element={<AdminDashboard />}>
           <Route path="users" element={<AdminUsers />} />
           <Route path="uploads" element={<AdminUploads />} />

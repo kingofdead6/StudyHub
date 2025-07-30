@@ -84,31 +84,27 @@ const Hero = () => {
           initial="hidden"
           animate="visible"
         >
-          <Link to="/chat">
+          <Link to="/login">
             <motion.button
-              className="inline-flex items-center justify-center whitespace-nowrap rounded-full text-lg font-medium h-14 px-10 py-3 bg-white text-gray-900 hover:bg-gray-100 transition-colors duration-300 shadow-lg"
+              className="cursor-pointer inline-flex items-center justify-center whitespace-nowrap rounded-full text-lg font-medium h-14 px-10 py-3 bg-white text-gray-900 hover:bg-gray-100 transition-colors duration-300 shadow-lg"
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               variants={itemVariants}
             >
-              Try StudyHub
+              Login
             </motion.button>
           </Link>
-          <a
-            href="https://drive.google.com/drive/folders/1IwKUdm8qoyTIY0BW1lLAZlWI90G--0sa?usp=drive_link"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center justify-center whitespace-nowrap rounded-full text-lg font-medium h-14 px-10 py-3 bg-transparent border border-gray-300 text-white hover:bg-white hover:text-gray-900 transition-colors duration-300 shadow-lg"
-            onClick={(e) => {
-              window.open(e.currentTarget.href, '_blank');
-              e.preventDefault();
-            }}
-            variants={itemVariants}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-          >
-            See Past Exams
-          </a>
+          <Link to="/courses">
+            <motion.button
+            className="cursor-pointer inline-flex items-center justify-center whitespace-nowrap rounded-full text-lg font-medium h-14 px-10 py-3 bg-transparent border border-gray-300 text-white hover:bg-white hover:text-gray-900 transition-colors duration-300 shadow-lg"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              variants={itemVariants}
+            >
+              See Past Exams
+            </motion.button>
+          </Link>
+          
         </motion.div>
       </div>
 

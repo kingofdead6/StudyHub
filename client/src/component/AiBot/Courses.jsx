@@ -1,54 +1,35 @@
 "use client";
 
-import { useState, useEffect, useRef, createContext, useContext } from "react";
+import { useState, useEffect, useContext, createContext } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Settings, ChevronLeft, ChevronRight, User, Bot, Menu, Upload, AlertCircle } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
-import "katex/dist/katex.min.css";
+import { ChevronLeft, ChevronRight, Menu, FileText } from "lucide-react";
+import axios from "axios";
+import { ToastContainer, toast } from "react-toastify";
+import "react-toastify/dist/ReactToastify.css";
 import { API_BASE_URL } from "../../../api";
-import { ToastContainer, toast } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
-import axios from 'axios';
 
-const ChatContext = createContext(null);
+const CoursesContext = createContext(null);
 
-const ChatProvider = ({ children }) => {
-  const [messages, setMessages] = useState([]);
-  const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
+const CoursesProvider = ({ children }) => {
+  const [uploads, setUploads] = useState([]);
   const [isSidebarVisible, setIsSidebarVisible] = useState(true);
+  const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
   const [selectedCourse, setSelectedCourse] = useState(null);
   const [selectedChild, setSelectedChild] = useState(null);
   const [selectedSemester, setSelectedSemester] = useState(null);
   const [selectedSubject, setSelectedSubject] = useState(null);
   const [selectedType, setSelectedType] = useState(null);
-  const [recommendedQuestions, setRecommendedQuestions] = useState([]);
-
-  const addMessage = (message, isUser) => {
-    setMessages((prev) => [...prev, { text: message, isUser }]);
-  };
-
-  const updateLastBotMessage = (text) => {
-    setMessages((prev) => {
-      const newMessages = [...prev];
-      if (newMessages.length > 0 && !newMessages[newMessages.length - 1].isUser) {
-        newMessages[newMessages.length - 1].text = text;
-      }
-      return newMessages;
-    });
-  };
+  const [isLoading, setIsLoading] = useState(false);
 
   return (
-    <ChatContext.Provider
+    <CoursesContext.Provider
       value={{
-        messages,
-        addMessage,
-        updateLastBotMessage,
-        isSidebarExpanded,
-        setIsSidebarExpanded,
+        uploads,
+        setUploads,
         isSidebarVisible,
         setIsSidebarVisible,
+        isSidebarExpanded,
+        setIsSidebarExpanded,
         selectedCourse,
         setSelectedCourse,
         selectedChild,
@@ -59,12 +40,12 @@ const ChatProvider = ({ children }) => {
         setSelectedSubject,
         selectedType,
         setSelectedType,
-        recommendedQuestions,
-        setRecommendedQuestions,
+        isLoading,
+        setIsLoading,
       }}
     >
       {children}
-    </ChatContext.Provider>
+    </CoursesContext.Provider>
   );
 };
 
@@ -81,10 +62,9 @@ const Sidebar = () => {
     setSelectedSubject,
     selectedType,
     setSelectedType,
-    recommendedQuestions,
-    setRecommendedQuestions,
-    addMessage,
-  } = useContext(ChatContext);
+    setUploads,
+    setIsLoading,
+  } = useContext(CoursesContext);
   const [currentView, setCurrentView] = useState("main");
 
   const buttonVariants = {
@@ -439,7 +419,7 @@ const Sidebar = () => {
     setSelectedSemester(null);
     setSelectedSubject(null);
     setSelectedType(null);
-    setRecommendedQuestions([]);
+    setUploads([]);
   };
 
   const handleChildClick = (child) => {
@@ -452,7 +432,7 @@ const Sidebar = () => {
     }
     setSelectedSubject(null);
     setSelectedType(null);
-    setRecommendedQuestions([]);
+    setUploads([]);
   };
 
   const handleSemesterClick = (semester) => {
@@ -460,26 +440,27 @@ const Sidebar = () => {
     setCurrentView("subjects");
     setSelectedSubject(null);
     setSelectedType(null);
-    setRecommendedQuestions([]);
+    setUploads([]);
   };
 
   const handleSubjectClick = (subject) => {
     setSelectedSubject(subject);
     setCurrentView("subject-details");
     setSelectedType(null);
-    setRecommendedQuestions([]);
+    setUploads([]);
   };
 
   const handleTypeClick = async (type) => {
     setSelectedType(type);
+    setIsLoading(true);
     toast.info(`Loading ${type.title} PDFs for ${selectedSubject.title}`, {
-      position: 'bottom-right',
+      position: "bottom-right",
       autoClose: 3000,
       hideProgressBar: false,
       closeOnClick: true,
       pauseOnHover: true,
       draggable: true,
-      theme: 'dark',
+      theme: "dark",
     });
 
     try {
@@ -495,45 +476,36 @@ const Sidebar = () => {
 
       const response = await axios.get(`${API_BASE_URL}/chat/uploads`, {
         params: queryParams,
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("token")}`,
+        },
       });
 
       const uploads = response.data;
+      setUploads(uploads);
       if (uploads.length === 0) {
-        toast.warn('No PDFs found for the selected criteria', {
-          position: 'bottom-right',
+        toast.warn("No PDFs found for the selected criteria", {
+          position: "bottom-right",
           autoClose: 3000,
-          theme: 'dark',
+          theme: "dark",
         });
-        setRecommendedQuestions([]);
-        return;
+      } else {
+        toast.success(`Loaded ${uploads.length} PDFs`, {
+          position: "bottom-right",
+          autoClose: 3000,
+          theme: "dark",
+        });
       }
-
-      const pdfLinks = uploads.map((upload) => upload.link).join(', ');
-      const message = `Loaded PDFs for ${selectedSubject.title} (${type.title}): ${pdfLinks}`;
-      addMessage(message, false);
-
-      const questionResponse = await axios.post(`${API_BASE_URL}/chat/recommended-questions`, {
-        year: selectedCourse.year,
-        semester: selectedSemester.semester,
-        module: selectedSubject.id,
-        type: type.id,
-        speciality: selectedChild?.speciality || null,
-      });
-
-      setRecommendedQuestions(questionResponse.data.questions || []);
-      toast.success(`Loaded ${uploads.length} PDFs and generated recommended questions`, {
-        position: 'bottom-right',
-        autoClose: 3000,
-        theme: 'dark',
-      });
     } catch (err) {
-      console.error('Error fetching PDFs or questions:', err);
-      toast.error('Failed to load PDFs or generate questions', {
-        position: 'bottom-right',
+      console.error("Error fetching PDFs:", err);
+      toast.error(err.response?.data?.message || "Failed to load PDFs", {
+        position: "bottom-right",
         autoClose: 3000,
-        theme: 'dark',
+        theme: "dark",
       });
-      setRecommendedQuestions([]);
+      setUploads([]);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -542,35 +514,35 @@ const Sidebar = () => {
       setCurrentView("subjects");
       setSelectedSubject(null);
       setSelectedType(null);
-      setRecommendedQuestions([]);
+      setUploads([]);
     } else if (currentView === "subjects") {
       if (selectedChild && selectedChild.type === "optional") {
         setCurrentView("children");
         setSelectedSemester(null);
         setSelectedType(null);
-        setRecommendedQuestions([]);
+        setUploads([]);
       } else if (selectedChild) {
         setCurrentView("semesters");
         setSelectedSemester(null);
         setSelectedType(null);
-        setRecommendedQuestions([]);
+        setUploads([]);
       } else if (selectedCourse) {
         setCurrentView("semesters");
         setSelectedSemester(null);
         setSelectedType(null);
-        setRecommendedQuestions([]);
+        setUploads([]);
       }
     } else if (currentView === "semesters") {
       if (selectedChild) {
         setCurrentView("children");
         setSelectedChild(null);
         setSelectedType(null);
-        setRecommendedQuestions([]);
+        setUploads([]);
       } else {
         setCurrentView("main");
         setSelectedCourse(null);
         setSelectedType(null);
-        setRecommendedQuestions([]);
+        setUploads([]);
       }
       setSelectedSemester(null);
     } else if (currentView === "children") {
@@ -578,13 +550,13 @@ const Sidebar = () => {
       setSelectedCourse(null);
       setSelectedChild(null);
       setSelectedType(null);
-      setRecommendedQuestions([]);
+      setUploads([]);
     }
   };
 
   const getSidebarTitle = () => {
     if (currentView === "main") {
-      return "ESi Hub";
+      return "Courses";
     } else if (currentView === "children" && selectedCourse) {
       return selectedCourse.title;
     } else if (currentView === "semesters" && selectedCourse) {
@@ -608,7 +580,7 @@ const Sidebar = () => {
       }
       return `${parentTitle} - ${selectedSubject.title}`;
     }
-    return "Esi Hub";
+    return "Courses";
   };
 
   const getSubjectsForSelectedSemester = () => {
@@ -630,20 +602,20 @@ const Sidebar = () => {
     <AnimatePresence>
       {isSidebarVisible && (
         <motion.div
-          className="w-64 h-full bg-gray-900 text-gray-100 p-4 flex flex-col shadow-lg rounded-r-2xl"
+          className="w-72 h-full bg-gray-900 text-gray-100 p-6 flex flex-col shadow-2xl rounded-r-3xl"
           initial={{ x: "-100%" }}
           animate={{ x: 0 }}
           exit={{ x: "-100%" }}
           transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
         >
-          <h2 className="text-2xl font-bold mb-6 text-center bg-gradient-to-r from-blue-400 to-purple-600 bg-clip-text text-transparent">
+          <h2 className="text-3xl font-extrabold mb-8 text-center bg-gradient-to-r from-blue-500 to-purple-700 bg-clip-text text-transparent">
             {getSidebarTitle()}
           </h2>
           <AnimatePresence mode="wait">
             {currentView === "main" && (
               <motion.div
                 key="main-courses"
-                className="space-y-3 flex-1"
+                className="space-y-4 flex-1"
                 initial="hidden"
                 animate="visible"
                 exit="exit"
@@ -652,10 +624,10 @@ const Sidebar = () => {
                 {coursesData.map((course) => (
                   <motion.div key={course.id} variants={buttonVariants}>
                     <motion.button
-                      className="inline-flex items-center whitespace-nowrap rounded-xl text-sm font-medium h-10 px-4 py-2 w-full justify-start bg-gradient-to-r from-gray-700 to-gray-800 text-gray-100 hover:from-gray-600 hover:to-gray-700 transition-colors duration-200 shadow-md"
+                      className="inline-flex items-center whitespace-nowrap rounded-xl text-base font-semibold h-12 px-5 py-3 w-full justify-start bg-gradient-to-r from-gray-800 to-gray-700 text-gray-100 hover:from-blue-600 hover:to-purple-600 transition-colors duration-300 shadow-lg"
                       onClick={() => handleCourseClick(course)}
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
+                      whileHover={{ scale: 1.03 }}
+                      whileTap={{ scale: 0.97 }}
                     >
                       {course.title}
                     </motion.button>
@@ -666,7 +638,7 @@ const Sidebar = () => {
             {currentView === "children" && selectedCourse && selectedCourse.children && (
               <motion.div
                 key="children"
-                className="space-y-3 flex-1"
+                className="space-y-4 flex-1"
                 initial="hidden"
                 animate="visible"
                 exit="exit"
@@ -676,8 +648,8 @@ const Sidebar = () => {
                   <motion.button
                     className="inline-flex items-center whitespace-nowrap rounded-xl text-sm font-medium h-10 px-4 py-2 w-full justify-start text-gray-300 hover:bg-gray-800 hover:text-gray-100 transition-colors duration-200 shadow-sm"
                     onClick={handleBack}
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.97 }}
                   >
                     <ChevronLeft className="mr-3 h-5 w-5" /> Back
                   </motion.button>
@@ -687,8 +659,8 @@ const Sidebar = () => {
                     <motion.button
                       className="inline-flex items-center whitespace-nowrap rounded-xl text-sm font-medium h-10 px-4 py-2 w-full justify-start text-gray-300 hover:bg-gray-800 hover:text-gray-100 transition-colors duration-200 shadow-sm"
                       onClick={() => handleChildClick(child)}
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
+                      whileHover={{ scale: 1.03 }}
+                      whileTap={{ scale: 0.97 }}
                     >
                       {child.title}
                     </motion.button>
@@ -699,7 +671,7 @@ const Sidebar = () => {
             {currentView === "semesters" && selectedCourse && (
               <motion.div
                 key="semesters"
-                className="space-y-3 flex-1"
+                className="space-y-4 flex-1"
                 initial="hidden"
                 animate="visible"
                 exit="exit"
@@ -709,8 +681,8 @@ const Sidebar = () => {
                   <motion.button
                     className="inline-flex items-center whitespace-nowrap rounded-xl text-sm font-medium h-10 px-4 py-2 w-full justify-start text-gray-300 hover:bg-gray-800 hover:text-gray-100 transition-colors duration-200 shadow-sm"
                     onClick={handleBack}
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.97 }}
                   >
                     <ChevronLeft className="mr-3 h-5 w-5" /> Back
                   </motion.button>
@@ -720,8 +692,8 @@ const Sidebar = () => {
                     <motion.button
                       className="inline-flex items-center whitespace-nowrap rounded-xl text-sm font-medium h-10 px-4 py-2 w-full justify-start text-gray-300 hover:bg-gray-800 hover:text-gray-100 transition-colors duration-200 shadow-sm"
                       onClick={() => handleSemesterClick(semester)}
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
+                      whileHover={{ scale: 1.03 }}
+                      whileTap={{ scale: 0.97 }}
                     >
                       {semester.title}
                     </motion.button>
@@ -732,7 +704,7 @@ const Sidebar = () => {
             {currentView === "subjects" && selectedCourse && (
               <motion.div
                 key="subjects"
-                className="space-y-3 flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-900"
+                className="space-y-4 flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-900"
                 initial="hidden"
                 animate="visible"
                 exit="exit"
@@ -742,8 +714,8 @@ const Sidebar = () => {
                   <motion.button
                     className="inline-flex items-center whitespace-nowrap rounded-xl text-sm font-medium h-10 px-4 py-2 w-full justify-start text-gray-300 hover:bg-gray-800 hover:text-gray-100 transition-colors duration-200 shadow-sm"
                     onClick={handleBack}
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.97 }}
                   >
                     <ChevronLeft className="mr-3 h-5 w-5" /> Back
                   </motion.button>
@@ -753,8 +725,8 @@ const Sidebar = () => {
                     <motion.button
                       className="inline-flex items-center whitespace-nowrap rounded-xl text-sm font-medium h-10 px-4 py-2 w-full justify-start text-gray-300 hover:bg-gray-800 hover:text-gray-100 transition-colors duration-200 shadow-sm"
                       onClick={() => handleSubjectClick(subject)}
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
+                      whileHover={{ scale: 1.03 }}
+                      whileTap={{ scale: 0.97 }}
                     >
                       {subject.title}
                     </motion.button>
@@ -765,7 +737,7 @@ const Sidebar = () => {
             {currentView === "subject-details" && selectedSubject && (
               <motion.div
                 key="subject-details"
-                className="space-y-3 flex-1"
+                className="space-y-4 flex-1"
                 initial="hidden"
                 animate="visible"
                 exit="exit"
@@ -775,8 +747,8 @@ const Sidebar = () => {
                   <motion.button
                     className="inline-flex items-center whitespace-nowrap rounded-xl text-sm font-medium h-10 px-4 py-2 w-full justify-start text-gray-300 hover:bg-gray-800 hover:text-gray-100 transition-colors duration-200 shadow-sm"
                     onClick={handleBack}
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.97 }}
                   >
                     <ChevronLeft className="mr-3 h-5 w-5" /> Back
                   </motion.button>
@@ -785,11 +757,11 @@ const Sidebar = () => {
                   <motion.div key={option.id} variants={buttonVariants}>
                     <motion.button
                       className={`inline-flex items-center whitespace-nowrap rounded-xl text-sm font-medium h-10 px-4 py-2 w-full justify-start text-gray-300 hover:bg-gray-800 hover:text-gray-100 transition-colors duration-200 shadow-sm ${
-                        selectedType?.id === option.id ? 'bg-gray-800 text-gray-100' : ''
+                        selectedType?.id === option.id ? "bg-gray-800 text-gray-100" : ""
                       }`}
                       onClick={() => handleTypeClick(option)}
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
+                      whileHover={{ scale: 1.03 }}
+                      whileTap={{ scale: 0.97 }}
                     >
                       {option.title}
                     </motion.button>
@@ -797,63 +769,64 @@ const Sidebar = () => {
                 ))}
               </motion.div>
             )}
-            {recommendedQuestions.length > 0 && (
-              <motion.div
-                key="recommended-questions"
-                className="mt-6 space-y-2 border-t border-gray-700 pt-4"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ duration: 0.3 }}
-              >
-                <h3 className="text-sm font-semibold text-gray-300">Recommended Questions:</h3>
-                {recommendedQuestions.map((question, index) => (
-                  <motion.button
-                    key={index}
-                    className="inline-flex items-start whitespace-normal rounded-xl text-sm font-medium px-4 py-2 w-full text-left text-gray-400 hover:bg-gray-800 hover:text-gray-100 transition-colors duration-200 shadow-sm"
-                    onClick={() => {
-                      document.getElementById('chat-input').value = question;
-                      document.getElementById('chat-input').dispatchEvent(new Event('input', { bubbles: true }));
-                    }}
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                  >
-                    <span className="truncate">{question}</span>
-                  </motion.button>
-                ))}
-              </motion.div>
-            )}
           </AnimatePresence>
-          <div className="mt-auto pt-4">
-            <motion.button
-              className="inline-flex items-center whitespace-nowrap rounded-xl text-sm font-medium h-10 px-4 py-2 w-full justify-start text-gray-300 hover:bg-gray-800 hover:text-gray-100 shadow-sm"
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-            >
-              <Settings className="mr-3 h-5 w-5" /> Account Settings
-            </motion.button>
-          </div>
         </motion.div>
       )}
     </AnimatePresence>
   );
 };
 
+const PdfCard = ({ upload }) => {
+  return (
+    <motion.a
+      href={upload.link}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex flex-col bg-gray-800/90 backdrop-blur-md rounded-2xl shadow-xl overflow-hidden transform transition-all duration-300 hover:shadow-2xl hover:scale-105 focus:scale-105 focus:outline-none focus:ring-2 focus:ring-blue-500"
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4 }}
+      aria-label={`Open PDF for university year ${upload.universityYear}`}
+    >
+      <div className="relative w-full h-48 bg-gray-700">
+        {upload.thumbnail ? (
+          <img
+            src={upload.thumbnail}
+            alt={`University year ${upload.universityYear} preview`}
+            className="w-full h-full object-cover"
+            loading="lazy"
+          />
+        ) : (
+          <div className="flex items-center justify-center w-full h-full bg-gradient-to-br from-gray-600 to-gray-800">
+            <FileText className="h-16 w-16 text-red-500" />
+          </div>
+        )}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent"></div>
+      </div>
+      <div className="p-4">
+        <h3 className="text-lg font-semibold text-gray-100 truncate">Year {upload.universityYear}</h3>
+        <p className="text-sm text-gray-400 mt-1">Click to view PDF</p>
+      </div>
+    </motion.a>
+  );
+};
+
 const Quote = () => {
-  const quote = "The only way to do great work is to love what you do.";
+  const quote = "Discover your course materials with ease.";
   return (
     <motion.div
       className="flex items-center justify-center h-full"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 1 }}
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.8 }}
     >
-      <p className="text-lg font-medium text-gray-400 max-w-md text-center">
+      <p className="text-xl font-medium text-gray-300 max-w-md text-center bg-gray-800/50 backdrop-blur-sm p-6 rounded-xl shadow-lg">
         {quote.split("").map((char, index) => (
           <motion.span
             key={index}
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: index * 0.05, duration: 0.3 }}
+            transition={{ delay: index * 0.03, duration: 0.3 }}
           >
             {char}
           </motion.span>
@@ -863,395 +836,17 @@ const Quote = () => {
   );
 };
 
-const ErrorMessage = ({ message }) => {
-  if (!message) return null;
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: -10 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -10 }}
-      className="flex items-center gap-2 text-red-400 text-sm mt-2 px-3"
-    >
-      <AlertCircle className="w-4 h-4" />
-      {message}
-    </motion.div>
-  );
-};
-
-const ChatMessage = ({ text, isUser }) => {
-  const words = text.split(' ');
-  const wordVariants = {
-    hidden: { opacity: 0, y: 10 },
-    visible: (i) => ({
-      opacity: 1,
-      y: 0,
-      transition: { delay: i * 0.05, duration: 0.3 },
-    }),
-  };
-
-  return (
-    <motion.div
-      className={`flex items-start gap-3 mb-4 ${isUser ? "justify-end" : "justify-start"}`}
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
-      {!isUser && (
-        <div className="relative flex h-10 w-10 shrink-0 overflow-hidden rounded-full bg-gradient-to-br from-blue-500 to-purple-600">
-          <div className="flex h-full w-full items-center justify-center rounded-full text-white">
-            <Bot className="h-5 w-5" />
-          </div>
-        </div>
-      )}
-      <div
-        className={`max-w-[70%] p-4 rounded-xl shadow-lg ${
-          isUser
-            ? "bg-gradient-to-r from-blue-600 to-blue-800 text-white rounded-br-none"
-            : "bg-gray-800/80 backdrop-blur-sm text-gray-100 rounded-bl-none"
-        } break-words`}
-      >
-        <div className="markdown-content prose prose-invert max-w-none">
-          {isUser ? (
-            <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-              {text}
-            </ReactMarkdown>
-          ) : (
-            words.map((word, index) => (
-              <motion.span
-                key={index}
-                variants={wordVariants}
-                initial="hidden"
-                animate="visible"
-                custom={index}
-              >
-                {word + (index < words.length - 1 ? ' ' : '')}
-              </motion.span>
-            ))
-          )}
-        </div>
-      </div>
-      {isUser && (
-        <div className="relative flex h-10 w-10 shrink-0 overflow-hidden rounded-full bg-gradient-to-br from-gray-600 to-gray-800">
-          <div className="flex h-full w-full items-center justify-center rounded-full text-white">
-            <User className="h-5 w-5" />
-          </div>
-        </div>
-      )}
-    </motion.div>
-  );
-};
-
-const ChatInput = () => {
-  const {
-    addMessage,
-    updateLastBotMessage,
-    selectedCourse,
-    selectedChild,
-    selectedSemester,
-    selectedSubject,
-    selectedType,
-    setRecommendedQuestions,
-  } = useContext(ChatContext);
-  const [input, setInput] = useState('');
-  const [error, setError] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const inputRef = useRef(null);
-  const fileInputRef = useRef(null);
-  const botMessageRef = useRef('');
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!input.trim()) {
-      setError('Please enter a message');
-      return;
-    }
-    if (isSubmitting) return;
-
-    setIsSubmitting(true);
-    const userMessage = input.trim();
-    addMessage(userMessage, true);
-    setInput('');
-    setError('');
-
-    try {
-      const queryParams = new URLSearchParams({
-        message: userMessage,
-      });
-
-      if (selectedCourse && selectedSemester && selectedSubject && selectedType) {
-        queryParams.append('year', selectedCourse.year);
-        queryParams.append('semester', selectedSemester.semester);
-        queryParams.append('module', selectedSubject.id);
-        queryParams.append('type', selectedType.id);
-        if (selectedChild && selectedChild.speciality) {
-          queryParams.append('speciality', selectedChild.speciality);
-        }
-      }
-
-      const eventSource = new EventSource(
-        `${API_BASE_URL}/chat?${queryParams.toString()}`
-      );
-
-      // Add a placeholder for the bot's response
-      addMessage('', false);
-      botMessageRef.current = '';
-
-      eventSource.onmessage = (event) => {
-        if (event.data === '[DONE]') {
-          eventSource.close();
-          setIsSubmitting(false);
-          botMessageRef.current = '';
-          return;
-        }
-        botMessageRef.current += event.data + ' ';
-        updateLastBotMessage(botMessageRef.current.trim());
-      };
-
-      eventSource.addEventListener('error', (err) => {
-        console.error('SSE error:', err);
-        updateLastBotMessage('⚠️ Error receiving stream');
-        eventSource.close();
-        setIsSubmitting(false);
-        botMessageRef.current = '';
-        toast.error('Failed to receive chat response', {
-          position: 'bottom-right',
-          autoClose: 3000,
-          hideProgressBar: false,
-          closeOnClick: true,
-          pauseOnHover: true,
-          draggable: true,
-          theme: 'dark',
-        });
-      });
-
-      eventSource.addEventListener('done', () => {
-        eventSource.close();
-        setIsSubmitting(false);
-        botMessageRef.current = '';
-      });
-    } catch (err) {
-      console.error('Chat error:', err);
-      updateLastBotMessage('⚠️ Error initiating chat');
-      setIsSubmitting(false);
-      botMessageRef.current = '';
-      toast.error('Failed to initiate chat', {
-        position: 'bottom-right',
-        autoClose: 3000,
-        hideProgressBar: false,
-        closeOnClick: true,
-        pauseOnHover: true,
-        draggable: true,
-        theme: 'dark',
-      });
-    }
-  };
-
-  const handleStandaloneFileUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) {
-      setError('No file selected');
-      return;
-    }
-
-    if (file.type !== 'application/pdf') {
-      setError('Please upload a PDF file');
-      return;
-    }
-
-    setIsSubmitting(true);
-    const formData = new FormData();
-    formData.append('file', file);
-
-    addMessage(`📄 Uploading standalone PDF: ${file.name}`, true);
-    addMessage('', false);
-
-    try {
-      const token = localStorage.getItem('token');
-      const response = await axios.post(`${API_BASE_URL}/chat/upload-standalone-pdf`, formData, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'multipart/form-data',
-        },
-      });
-
-      const { filename, questions } = response.data;
-      updateLastBotMessage(`Standalone PDF uploaded successfully: ${filename}`);
-      setRecommendedQuestions(questions || []);
-      toast.success('Standalone PDF uploaded and processed successfully', {
-        position: 'bottom-right',
-        autoClose: 3000,
-        hideProgressBar: false,
-        closeOnClick: true,
-        pauseOnHover: true,
-        draggable: true,
-        theme: 'dark',
-      });
-    } catch (err) {
-      console.error('Standalone PDF upload error:', err);
-      updateLastBotMessage('⚠️ Error uploading standalone PDF');
-      toast.error(err.response?.data?.message || 'Failed to upload standalone PDF', {
-        position: 'bottom-right',
-        autoClose: 5000,
-        hideProgressBar: false,
-        closeOnClick: true,
-        pauseOnHover: true,
-        draggable: true,
-        theme: 'dark',
-      });
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleFileUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) {
-      setError('No file selected');
-      return;
-    }
-
-    if (file.type !== 'application/pdf') {
-      setError('Please upload a PDF file');
-      return;
-    }
-
-    if (!selectedCourse || !selectedSemester || !selectedSubject || !selectedType) {
-      setError('Please select year, semester, module, and type before uploading');
-      return;
-    }
-
-    setIsSubmitting(true);
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('year', selectedCourse.year);
-    formData.append('universityYear', new Date().getFullYear());
-    formData.append('semester', selectedSemester.semester);
-    formData.append('module', selectedSubject.id);
-    formData.append('type', selectedType.id);
-    if (selectedChild && selectedChild.speciality) {
-      formData.append('speciality', selectedChild.speciality);
-    }
-
-    addMessage(`📄 Uploading PDF: ${file.name}`, true);
-    addMessage('', false);
-
-    try {
-      const token = localStorage.getItem('token');
-      const response = await axios.post(`${API_BASE_URL}/chat/upload-pdf`, formData, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'multipart/form-data',
-        },
-      });
-
-      const { upload, questions } = response.data;
-      updateLastBotMessage(`PDF uploaded successfully: ${upload.link}`);
-      setRecommendedQuestions(questions || []);
-      toast.success('PDF uploaded and processed successfully', {
-        position: 'bottom-right',
-        autoClose: 3000,
-        hideProgressBar: false,
-        closeOnClick: true,
-        pauseOnHover: true,
-        draggable: true,
-        theme: 'dark',
-      });
-    } catch (err) {
-      console.error('PDF upload error:', err);
-      updateLastBotMessage('⚠️ Error uploading PDF');
-      toast.error(err.response?.data?.message || 'Failed to upload PDF', {
-        position: 'bottom-right',
-        autoClose: 5000,
-        hideProgressBar: false,
-        closeOnClick: true,
-        pauseOnHover: true,
-        draggable: true,
-        theme: 'dark',
-      });
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const triggerFileInput = (isStandalone = false) => {
-    fileInputRef.current.click();
-    fileInputRef.current.onchange = isStandalone ? handleStandaloneFileUpload : handleFileUpload;
-  };
-
-  return (
-    <div className="relative">
-      <motion.form
-        onSubmit={handleSubmit}
-        className="w-full max-w-3xl mt-4 mb-4 mx-auto relative z-10"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-      >
-        <div className="backdrop-blur-xl bg-gray-900/30 border border-gray-700/50 rounded-2xl p-4 shadow-xl">
-          <div className="flex items-center gap-3">
-            <input
-              id="chat-input"
-              ref={inputRef}
-              type="text"
-              value={input}
-              onChange={(e) => {
-                setInput(e.target.value);
-                setError('');
-              }}
-              placeholder="Type your message or select a recommended question..."
-              className="flex-1 outline-none px-4 py-3 bg-transparent text-gray-100 placeholder-gray-500 focus:ring-0 text-base border-none rounded-lg"
-              aria-invalid={error ? 'true' : 'false'}
-              aria-describedby={error ? 'chat-error' : undefined}
-              disabled={isSubmitting}
-            />
-            <motion.button
-              type="submit"
-              className="inline-flex items-center justify-center whitespace-nowrap rounded-xl text-sm font-medium h-12 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white hover:from-blue-700 hover:to-purple-700 shadow-md"
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              disabled={isSubmitting}
-            >
-              {isSubmitting ? 'Sending...' : 'Send'}
-            </motion.button>
-            <motion.button
-              type="button"
-              onClick={() => triggerFileInput(true)}
-              className="inline-flex items-center justify-center whitespace-nowrap rounded-xl text-sm font-medium h-12 px-6 py-3 bg-gradient-to-r from-gray-700 to-gray-800 text-gray-100 hover:from-gray-600 hover:to-gray-700 shadow-md"
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              disabled={isSubmitting}
-            >
-              <Upload className="h-5 w-5 mr-2" /> Upload PDF
-            </motion.button>
-            <input
-              type="file"
-              ref={fileInputRef}
-              accept="application/pdf"
-              className="hidden"
-            />
-          </div>
-          <AnimatePresence>
-            <ErrorMessage message={error} />
-          </AnimatePresence>
-        </div>
-      </motion.form>
-      <ToastContainer />
-    </div>
-  );
-};
-
 const HamburgerToggle = () => {
-  const { isSidebarVisible, setIsSidebarVisible } = useContext(ChatContext);
+  const { isSidebarVisible, setIsSidebarVisible } = useContext(CoursesContext);
   const [isHovered, setIsHovered] = useState(false);
   return (
     <motion.div
-      className="fixed top-4 left-4 z-50 p-2 rounded-full bg-gray-900/80 hover:bg-gray-800 cursor-pointer transition-colors duration-200 shadow-lg"
+      className="fixed top-4 left-4 z-50 p-3 rounded-full bg-gray-900/90 hover:bg-gray-800 cursor-pointer transition-colors duration-200 shadow-lg"
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       onClick={() => setIsSidebarVisible(!isSidebarVisible)}
-      whileHover={{ scale: 1.05 }}
-      whileTap={{ scale: 0.95 }}
+      whileHover={{ scale: 1.1 }}
+      whileTap={{ scale: 0.9 }}
     >
       <AnimatePresence mode="wait">
         {isHovered ? (
@@ -1263,9 +858,9 @@ const HamburgerToggle = () => {
             transition={{ duration: 0.2 }}
           >
             {isSidebarVisible ? (
-              <ChevronLeft className="h-6 w-6 text-gray-300" />
+              <ChevronLeft className="h-7 w-7 text-gray-200" />
             ) : (
-              <ChevronRight className="h-6 w-6 text-gray-300" />
+              <ChevronRight className="h-7 w-7 text-gray-200" />
             )}
           </motion.div>
         ) : (
@@ -1276,7 +871,7 @@ const HamburgerToggle = () => {
             exit={{ opacity: 0, rotate: 90 }}
             transition={{ duration: 0.2 }}
           >
-            <Menu className="h-6 w-6 text-gray-300" />
+            <Menu className="h-7 w-7 text-gray-200" />
           </motion.div>
         )}
       </AnimatePresence>
@@ -1284,39 +879,44 @@ const HamburgerToggle = () => {
   );
 };
 
-const ChatPage = () => {
-  const { messages, recommendedQuestions } = useContext(ChatContext);
-  const messagesEndRef = useRef(null);
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+const CoursesPage = () => {
+  const { uploads, isLoading } = useContext(CoursesContext);
 
   return (
     <div className="flex h-screen bg-gray-950 text-gray-100">
       <Sidebar />
       <div className="flex-1 flex flex-col">
         <HamburgerToggle />
-        <div className="flex-1 p-6 overflow-hidden flex flex-col pt-16">
-          {messages.length === 0 && recommendedQuestions.length === 0 && <Quote />}
+        <div className="flex-1 p-8 overflow-hidden flex flex-col pt-16">
+          {uploads.length === 0 && !isLoading && <Quote />}
           <div className="h-full pr-4 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-900">
-            {messages.map((msg, index) => (
-              <ChatMessage key={index} text={msg.text} isUser={msg.isUser} />
-            ))}
-            <div ref={messagesEndRef} />
+            {isLoading ? (
+              <div className="flex justify-center items-center h-full">
+                <motion.div
+                  className="rounded-full h-16 w-16 border-t-4 border-b-4 border-blue-600"
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                />
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                {uploads.map((upload) => (
+                  <PdfCard key={upload.id} upload={upload} />
+                ))}
+              </div>
+            )}
           </div>
         </div>
-        <div className="p-6">
-          <ChatInput />
-        </div>
       </div>
+      <ToastContainer />
     </div>
   );
 };
 
-const ChatPageWithProvider = () => (
-  <ChatProvider>
-    <ChatPage />
-  </ChatProvider>
+const CoursesPageWithProvider = () => (
+  <CoursesProvider>
+    <CoursesPage />
+  </CoursesProvider>
 );
 
-export default ChatPageWithProvider;
+export default CoursesPageWithProvider;

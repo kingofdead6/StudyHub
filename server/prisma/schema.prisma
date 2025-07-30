@@ -28,13 +28,13 @@ model Contact {
 
 model Upload {
   id            Int         @id @default(autoincrement())
-  link          String      // Cloudinary URL for the PDF
+  link          String     
   year          Int
   universityYear Int
   semester      Int
   module        String
-  type          String      // Restricted to 'Course', 'TD', 'EMD'
+  type          String      
   speciality    String?
-  solution      String?     // Optional Google Drive link for solution
+  solution      String?     
   createdAt     DateTime    @default(now())
 }

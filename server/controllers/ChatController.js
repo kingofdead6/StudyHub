@@ -49,11 +49,6 @@ export const handlePdfUploadStream = async (req, res) => {
       const { year, universityYear, semester, module, type, speciality } = req.body;
       const file = req.file;
 
-      if (!file || !year || !universityYear || !semester || !module || !type) {
-        res.write('event: error\ndata: All required fields (file, year, universityYear, semester, module, type) must be provided\n\n');
-        res.end();
-        return;
-      }
 
       if (file.mimetype !== 'application/pdf') {
         res.write('event: error\ndata: Only PDF files are allowed\n\n');
@@ -281,12 +276,17 @@ export const recommendedQuestions = async (req, res) => {
   }
 };
 
-// Controller for /chat (SSE response)
 export const chat = async (req, res) => {
   try {
     const { message, year, semester, module, type, speciality } = req.query;
     if (!message) {
-      return res.status(400).json({ error: 'Message is required' });
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.write('data: Error: Message is required\n\n');
+      res.write('event: done\n\n');
+      res.end();
+      return;
     }
 
     res.setHeader('Content-Type', 'text/event-stream');
@@ -300,42 +300,59 @@ export const chat = async (req, res) => {
         semester: parseInt(semester),
         module,
         type,
+        ...(speciality && { speciality }),
       };
-      if (speciality) {
-        filters.speciality = speciality;
-      }
 
+      console.log('Fetching uploads with filters:', filters);
       const uploads = await prisma.upload.findMany({
         where: filters,
+        orderBy: { universityYear: 'desc' },
+        take: 5,
       });
+      console.log('Found uploads:', uploads.length);
 
       for (const upload of uploads) {
         try {
+          console.log(`Fetching PDF: ${upload.link}`);
           const response = await fetch(upload.link);
           if (!response.ok) {
             console.error(`Failed to fetch PDF from ${upload.link}: ${response.status}`);
             continue;
           }
-          const arrayBuffer = await response.arrayBuffer();
-          const buffer = Buffer.from(arrayBuffer);
+          const buffer = Buffer.from(await response.arrayBuffer());
           let pdfText = await extractTextFromPDF(buffer);
+          console.log(`Extracted text length for ${upload.link}: ${pdfText.length}`);
           if (!pdfText || pdfText.length < 20) {
+            console.warn(`PDF parsing failed for ${upload.link}, using OCR...`);
             pdfText = await extractTextFromPDFWithOCR(buffer);
+            console.log(`OCR text length for ${upload.link}: ${pdfText.length}`);
           }
-          context += `\n\nPDF Content (${upload.module} - ${upload.type}):\n${pdfText}`;
+          if (pdfText && pdfText.trim().length >= 10) {
+            context += `\n\nPDF Content (${upload.module} - ${upload.type}):\n${pdfText.slice(0, 5000)}`;
+          } else {
+            console.warn(`PDF ${upload.link} is empty or unreadable`);
+          }
         } catch (err) {
-          console.error(`Error fetching PDF from ${upload.link}:`, err);
+          console.error(`Error fetching PDF from ${upload.link}:`, err.message);
         }
+      }
+
+      if (context) {
+        const summaryPrompt = `Summarize the following content into a concise overview (max 500 words):\n${context}`;
+        context = await askGroq(summaryPrompt);
+      } else {
+        console.log('No valid PDF content found for chat context');
       }
     }
 
     const prompt = context
-      ? `Based on the following PDF content:\n${context}\n\nUser query: ${message}`
-      : message;
+      ? `You are an expert tutor in ${module || 'the relevant subject'}. Answer the user's question based on the provided PDF content. If the content is insufficient, use your general knowledge but note any assumptions. Format math in LaTeX (e.g., $x^2$) and code in markdown code blocks.\n\nPDF Content:\n${context}\n\nQuestion: ${message}`
+      : `You are a knowledgeable assistant. Answer the user's question conversationally and accurately. Format math in LaTeX (e.g., $x^2$) and code in markdown code blocks if applicable.\n\nQuestion: ${message}`;
 
+    console.log('Sending prompt to Groq, length:', prompt.length);
     await askGroqStream(prompt, res);
   } catch (err) {
-    console.error('Error in /chat route:', err);
+    console.error('Error in /chat route:', err.message);
     res.write('data: ⚠️ Error receiving stream\n\n');
     res.write('event: done\n\n');
     res.end();
@@ -506,7 +523,6 @@ export const getUploads = async (req, res) => {
   }
 };
 
-// Controller for /uploads/:id (DELETE)
 export const deleteUpload = async (req, res) => {
   try {
     await authMiddleware(req, res, async () => {
@@ -551,7 +567,6 @@ export const deleteUpload = async (req, res) => {
   }
 };
 
-// Controller for /pdf (JSON response)
 export const handlePdf = async (req, res) => {
   try {
     if (!req.file) {
@@ -578,5 +593,111 @@ export const handlePdf = async (req, res) => {
   } catch (err) {
     console.error('Error in /pdf route:', err.message);
     res.status(500).json({ error: 'Internal Server Error' });
+  }
+};
+
+
+
+
+
+export const uploadstandalonepdf = async (req, res) => {
+  try {
+    console.log('Starting uploadstandalonepdf function');
+    const file = req.file;
+
+    console.log('Received file:', file ? { originalname: file.originalname, size: file.size, mimetype: file.mimetype, path: file.path } : 'No file');
+
+    // Validate file presence and type
+    if (!file) {
+      console.log('Validation failed: No file uploaded');
+      return res.status(400).json({ message: 'No file uploaded' });
+    }
+    if (file.mimetype !== 'application/pdf') {
+      console.log('Validation failed: Invalid file type', file.mimetype);
+      return res.status(400).json({ message: 'Only PDF files are allowed' });
+    }
+
+    // Sanitize filename for public_id
+    const sanitizedFileName = file.originalname
+      .replace(/\s+/g, '_')
+      .replace(/[^a-zA-Z0-9._-]/g, '');
+    const publicId = `Uploads/pdf_${Date.now()}_${sanitizedFileName}`;
+    const filePath = path.join(__dirname, '..', file.path);
+
+    console.log(`Starting Cloudinary upload for file: ${file.originalname}, public_id: ${publicId}`);
+
+    // Upload PDF to Cloudinary
+    const uploadResult = await cloudinary.uploader.upload(filePath, {
+      folder: 'Uploads',
+      resource_type: 'raw',
+      public_id: publicId,
+      access_mode: 'public',
+    });
+    console.log('Cloudinary upload successful:', {
+      public_id: uploadResult.public_id,
+      secure_url: uploadResult.secure_url,
+      bytes: uploadResult.bytes,
+      access_mode: uploadResult.access_mode,
+    });
+
+    // Extract text from PDF using the temporary file
+    console.log('Processing PDF...');
+    let pdfContent = await extractTextFromPDF(filePath);
+    console.log('PDF content length:', pdfContent?.length || 0);
+
+    // Generate recommended questions
+    console.log('Generating recommended questions...');
+    const questions = await generateRecommendedQuestions(pdfContent);
+
+    // Clean up temporary file
+    console.log('Cleaning up temporary file:', filePath);
+    await fs.unlink(filePath).catch((err) => console.error(`Error deleting temporary file ${filePath}:`, err));
+
+    // Save Cloudinary URL to database
+    console.log('Saving upload to database:', { link: uploadResult.secure_url });
+    const upload = await prisma.upload.create({
+      data: {
+        link: uploadResult.secure_url,
+        filename: file.originalname,
+      },
+    });
+
+    console.log('Database save successful:', {
+      uploadId: upload.id,
+      link: upload.link,
+    });
+
+    // Store in session (optional)
+    if (req.session) {
+      req.session.standalonePDF = {
+        filePath,
+        filename: file.originalname,
+      };
+      console.log('Session updated:', req.session.standalonePDF);
+    } else {
+      console.warn('Session middleware not initialized');
+    }
+
+    res.status(201).json({ message: 'Standalone PDF uploaded successfully', filename: file.originalname, questions, upload });
+  } catch (err) {
+    console.error('Error in uploadstandalonepdf:', {
+      message: err.message,
+      stack: err.stack,
+    });
+    let errorMessage = 'Failed to upload standalone PDF';
+    if (err.message.includes('Customer is marked as untrusted')) {
+      errorMessage = 'Failed to upload PDF: Customer is marked as untrusted. Please enable PDF delivery in Cloudinary settings under Security > PDF and ZIP files delivery.';
+    } else {
+      errorMessage = `Failed to upload standalone PDF: ${err.message}`;
+    }
+    // Clean up temporary file in case of error
+    if (req.file?.path) {
+      const filePath = path.join(__dirname, '..', req.file.path);
+      await fs.unlink(filePath).catch((err) => console.error(`Error deleting temporary file ${filePath}:`, err));
+    }
+    res.status(500).json({ message: errorMessage, error: err.message });
+  } finally {
+    console.log('Disconnecting Prisma client');
+    await prisma.$disconnect();
   }
 };

@@ -1,23 +1,28 @@
-// extractTextFromPDF.js
-const pdfParse = require("pdf-parse");
-const fs = require("fs");
-const pdf = require("pdf-parse");
+// utils/extractTextFromPDF.cjs
+const PDFParser = require('pdf2json');
 
-const extractTextFromPDF = async (filePath) => {
-  try {
-    const dataBuffer = fs.readFileSync(filePath);
-    const data = await pdf(dataBuffer);
+async function extractTextFromPDF(buffer) {
+  return new Promise((resolve, reject) => {
+    const pdfParser = new PDFParser(null, true); // Enable verbose logging
 
-    if (!data.text || data.text.trim().length === 0) {
-      console.error("❌ PDF parsing returned empty text.");
-      return null;
+    pdfParser.on('pdfParser_dataError', err => {
+      console.error('PDF parsing error:', err.parserError);
+      reject(new Error(`PDF parsing error: ${err.parserError}`));
+    });
+
+    pdfParser.on('pdfParser_dataReady', pdfData => {
+      const text = pdfParser.getRawTextContent().replace(/\r\n/g, '\n').trim();
+      console.log('PDF extracted text sample:', text.slice(0, 100)); // Log sample for debugging
+      resolve(text);
+    });
+
+    try {
+      pdfParser.parseBuffer(buffer);
+    } catch (err) {
+      console.error('Failed to parse PDF buffer:', err.message);
+      reject(new Error(`Failed to parse PDF buffer: ${err.message}`));
     }
-
-    return data.text.trim(); // Cleaned text
-  } catch (error) {
-    console.error("Error parsing PDF:", error);
-    return null;
-  }
-};
+  });
+}
 
 module.exports = extractTextFromPDF;
